@@ -5,7 +5,8 @@ import { Question, Test, AppData, Section } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.mjs';
+// Fixed: Use version 3.11.174 to match package.json and use .min.js for better compatibility
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
 interface QuantitativeManagementViewProps {
     onBack: () => void;
@@ -79,19 +80,30 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
     const handleReferenceFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
-            setReferenceFile(file);
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-            const pageIndex = pdf.numPages > 1 ? 2 : 1;
-            const page = await pdf.getPage(pageIndex);
-            const viewport = page.getViewport({ scale: 2.0 });
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-            if (context) {
-                await page.render({ canvasContext: context, viewport: viewport }).promise;
-                setReferenceImage(canvas.toDataURL('image/jpeg'));
+            try {
+                setReferenceFile(file);
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+                
+                // If PDF has more than 1 page, use page 2 (often representative), else page 1
+                const pageIndex = pdf.numPages > 1 ? 2 : 1;
+                const page = await pdf.getPage(pageIndex);
+                
+                const viewport = page.getViewport({ scale: 2.0 });
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                if (context) {
+                    await page.render({ canvasContext: context, viewport: viewport }).promise;
+                    setReferenceImage(canvas.toDataURL('image/jpeg'));
+                }
+            } catch (error: any) {
+                console.error("Error processing reference PDF:", error);
+                alert(`حدث خطأ أثناء معالجة الملف: ${error.message || 'تأكد من أن الملف PDF صالح'}`);
+                setReferenceFile(null);
+                setReferenceImage(null);
             }
         }
     };

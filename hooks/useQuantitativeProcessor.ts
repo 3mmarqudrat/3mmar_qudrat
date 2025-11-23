@@ -4,7 +4,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { Question, Section } from '../types';
 
 // Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.mjs';
+// Fixed: Use version 3.11.174 to match package.json and use .min.js
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
 // Declare Tesseract globally
 declare const Tesseract: any;
