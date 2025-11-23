@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Section, Test, TestAttempt, UserAnswer, Question, Folder, VERBAL_BANKS, VERBAL_CATEGORIES, VerbalTests, FolderQuestion, AppData, User, ReviewFilterState } from './types';
+import { Section, Test, TestAttempt, UserAnswer, Question, Folder, VERBAL_BANKS, VERBAL_CATEGORIES, VerbalTests, FolderQuestion, AppData, User, ReviewFilterState, ReviewAttributeFilterType } from './types';
 import { useAppData } from './hooks/useAppData';
+import { useQuantitativeProcessor } from './hooks/useQuantitativeProcessor';
 import { BarChartIcon, BookOpenIcon, PlusCircleIcon, ArrowLeftIcon, HistoryIcon, TrashIcon, UploadCloudIcon, CheckCircleIcon, XCircleIcon, FolderIcon, SaveIcon, ChevronDownIcon, ArrowRightIcon, PlayIcon, LogOutIcon, UserIcon, MailIcon, KeyIcon, FileTextIcon, EyeIcon, EyeOffIcon, InfoIcon, ClockIcon, SettingsIcon, BookmarkIcon, CalendarIcon } from './components/Icons';
 import { AuthView } from './components/AuthView';
 import { AdminView } from './components/AdminView';
@@ -14,41 +15,46 @@ import { TakeTestView } from './components/TakeTestView';
 import { SessionState, sessionService } from './services/sessionService';
 import { SummaryView } from './components/SummaryView';
 
+const toArabic = (n: number | string) => ('' + n).replace(/[0-9]/g, d => '٠١٢٣٤٥٦٧٨٩'[parseInt(d)]);
+
 // Fix: Add formatTime function to be used in multiple components for displaying durations.
 const formatTime = (totalSeconds: number) => {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    return `${toArabic(String(minutes).padStart(2, '0'))}:${toArabic(String(seconds).padStart(2, '0'))}`;
 };
 
-const toArabicNumerals = (str: string) => {
-    return str.replace(/[0-9]/g, d => '٠١٢٣٤٥٦٧٨٩'[parseInt(d)]);
-};
+// Updated Date Formatter to return parts for flex layout
+const formatDateParts = (dateString: string) => {
+    const d = new Date(dateString);
+    const dayName = d.toLocaleDateString('ar-SA', { weekday: 'long' });
 
-const formatDateShort = (dateString: string) => {
-    const date = new Date(dateString);
-    const dayName = date.toLocaleDateString('ar-SA', { weekday: 'long' });
+    // Hijri
+    const hParts = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', {
+        day: 'numeric', month: 'numeric', year: 'numeric'
+    }).formatToParts(d);
     
-    // Manual formatting for exact control
-    const gregDay = toArabicNumerals(date.getDate().toString());
-    const gregMonth = toArabicNumerals((date.getMonth() + 1).toString()); // Numeric month
-    const gregYear = toArabicNumerals(date.getFullYear().toString());
-    const gregDate = `${gregDay}/${gregMonth}/${gregYear} م`;
+    const hDay = toArabic(hParts.find(p => p.type === 'day')?.value || '');
+    const hMonth = toArabic(hParts.find(p => p.type === 'month')?.value || '');
+    const hYear = toArabic(hParts.find(p => p.type === 'year')?.value || '');
+    // Internal string construction: Day / Month / Year
+    const hijriDate = `${hDay} / ${hMonth} / ${hYear} هـ`;
 
-    const hijriFormatter = new Intl.DateTimeFormat('ar-SA-u-ca-islamic', {
-        day: 'numeric',
-        month: 'numeric', // Numeric month
-        year: 'numeric'
-    });
-    const hijriParts = hijriFormatter.formatToParts(date);
-    const hijriDay = toArabicNumerals(hijriParts.find(p => p.type === 'day')?.value || '');
-    const hijriMonth = toArabicNumerals(hijriParts.find(p => p.type === 'month')?.value || '');
-    const hijriYear = toArabicNumerals(hijriParts.find(p => p.type === 'year')?.value || '');
-    const hijriDate = `${hijriDay}/${hijriMonth}/${hijriYear} هـ`;
+    // Gregorian
+    const gDay = toArabic(d.getDate());
+    const gMonth = toArabic(d.getMonth() + 1);
+    const gYear = toArabic(d.getFullYear());
+    const gregDate = `${gDay} / ${gMonth} / ${gYear} م`;
 
-    const time = toArabicNumerals(date.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    // Time 12h (1-12)
+    let hours = d.getHours();
+    const minutes = d.getMinutes();
+    const ampm = hours >= 12 ? 'مساءً' : 'صباحاً';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // 0 becomes 12
+    const time = `${toArabic(hours)}:${toArabic(minutes.toString().padStart(2, '0'))} ${ampm}`;
 
-    return { dayName, gregDate, hijriDate, time };
+    return { dayName, hijriDate, gregDate, time };
 };
 
 const UserMenu: React.FC<{ user: User; onLogout: () => void; children?: React.ReactNode; }> = ({ user, onLogout, children }) => (
@@ -64,6 +70,155 @@ const UserMenu: React.FC<{ user: User; onLogout: () => void; children?: React.Re
         </button>
     </div>
 );
+
+// --- Custom Multi-Select Dropdown Component ---
+const MultiSelectDropdown: React.FC<{
+    label: string;
+    options: { value: string; label: string }[];
+    selectedValues: string[]; // ['all'] or ['val1', 'val2']
+    onChange: (newValues: string[]) => void;
+    showInput?: boolean; // For Test Range input
+    inputPlaceholder?: string;
+}> = ({ label, options, selectedValues, onChange, showInput, inputPlaceholder }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [inputValue, setInputValue] = useState('');
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    // Close dropdown on click outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const isAllSelected = selectedValues.includes('all');
+
+    const handleOptionToggle = (value: string) => {
+        if (value === 'all') {
+            onChange(['all']);
+            return;
+        }
+
+        let newValues: string[];
+        if (isAllSelected) {
+            // If all was selected, selecting a specific item switches to just that item
+            newValues = [value];
+        } else {
+            if (selectedValues.includes(value)) {
+                newValues = selectedValues.filter(v => v !== value);
+            } else {
+                newValues = [...selectedValues, value];
+            }
+        }
+
+        // Logic: If all specific options are selected, revert to 'all'
+        const availableOptionsCount = options.filter(o => o.value !== 'all').length;
+        if (newValues.length === availableOptionsCount) {
+             onChange(['all']);
+        } else if (newValues.length === 0) {
+            onChange(['all']); // Default back to all if nothing selected
+        } else {
+            onChange(newValues);
+        }
+    };
+
+    const handleInputChange = (val: string) => {
+        setInputValue(val);
+        // Parse range logic (e.g., 1-5)
+        const rangeMatch = val.match(/^(\d+)-(\d+)$/);
+        if (rangeMatch) {
+            const start = parseInt(rangeMatch[1]);
+            const end = parseInt(rangeMatch[2]);
+            const min = Math.min(start, end);
+            const max = Math.max(start, end);
+            
+            // Find option IDs that match numbers in the range
+            const matchedValues: string[] = [];
+            options.forEach(opt => {
+                 if (opt.value === 'all') return;
+                 // Assuming labels contain the number (e.g. "اختبار 1")
+                 const numMatch = opt.label.match(/\d+/);
+                 if (numMatch) {
+                     const num = parseInt(numMatch[0]);
+                     if (num >= min && num <= max) {
+                         matchedValues.push(opt.value);
+                     }
+                 }
+            });
+            
+            if (matchedValues.length > 0) {
+                 const availableOptionsCount = options.filter(o => o.value !== 'all').length;
+                 if (matchedValues.length === availableOptionsCount) {
+                     onChange(['all']);
+                 } else {
+                     onChange(matchedValues);
+                 }
+            }
+        }
+    };
+
+    return (
+        <div className="relative" ref={dropdownRef}>
+            <label className="block text-sm font-medium mb-1 text-text-muted">{label}</label>
+            <button 
+                onClick={() => setIsOpen(!isOpen)} 
+                className="w-full p-2 border rounded-md bg-zinc-700 text-slate-200 border-zinc-600 h-11 flex justify-between items-center text-sm"
+            >
+                <span className="truncate">
+                    {isAllSelected ? 'الكل' : `${toArabic(selectedValues.length)} محدد`}
+                </span>
+                <ChevronDownIcon className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isOpen && (
+                <div className="absolute z-50 w-full mt-1 bg-zinc-800 border border-zinc-600 rounded-md shadow-xl max-h-60 flex flex-col">
+                    {showInput && (
+                        <div className="p-2 border-b border-zinc-700">
+                             <input 
+                                type="text"
+                                value={inputValue}
+                                onChange={e => handleInputChange(e.target.value)}
+                                placeholder={inputPlaceholder}
+                                className="w-full p-1.5 bg-zinc-900 border border-zinc-600 rounded text-xs text-white text-center"
+                                dir="ltr"
+                             />
+                        </div>
+                    )}
+                    <div className="overflow-y-auto flex-1 p-1 space-y-1 custom-scrollbar">
+                        <div 
+                            onClick={() => handleOptionToggle('all')}
+                            className={`flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-zinc-700 ${isAllSelected ? 'bg-primary/20 text-primary' : ''}`}
+                        >
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${isAllSelected ? 'bg-primary border-primary' : 'border-zinc-500'}`}>
+                                {isAllSelected && <CheckCircleIcon className="w-3 h-3 text-white" />}
+                            </div>
+                            <span className="text-sm font-bold">الكل</span>
+                        </div>
+                        {options.filter(o => o.value !== 'all').map(opt => {
+                            const isSelected = selectedValues.includes(opt.value);
+                            return (
+                                <div 
+                                    key={opt.value}
+                                    onClick={() => handleOptionToggle(opt.value)}
+                                    className={`flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-zinc-700 ${isSelected ? 'bg-zinc-700' : ''}`}
+                                >
+                                     <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-accent border-accent' : 'border-zinc-500'}`}>
+                                        {isSelected && <CheckCircleIcon className="w-3 h-3 text-white" />}
+                                    </div>
+                                    <span className="text-sm">{opt.label}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 
 const Header: React.FC<{
@@ -133,9 +288,9 @@ const HomeView: React.FC<{
     
     return (
         <div className="bg-bg min-h-screen">
+             {/* Removed title from header as requested */}
             <header className="bg-surface/80 backdrop-blur-lg p-4 sticky top-0 z-20 border-b" style={{borderColor: 'var(--color-border)'}}>
                 <div className="container mx-auto flex items-center justify-between">
-                    {/* Header Title Removed as requested */}
                     <div className="flex-1"></div> 
                     <div className="flex items-center gap-2 md:gap-4">
                         { isDevUser && (
@@ -449,44 +604,41 @@ const SectionView: React.FC<{
 
                                 <div className="flex justify-between items-center mt-8 mb-4 border-b border-border pb-2">
                                     <h4 className="text-xl font-bold">سجل المحاولات</h4>
-                                    <span className="text-sm font-bold text-text-muted bg-zinc-700 px-3 py-1 rounded-full">{attemptsForSelectedTest.length} محاولات</span>
+                                    <span className="text-sm font-bold text-text-muted bg-zinc-700 px-3 py-1 rounded-full">{toArabic(attemptsForSelectedTest.length)} محاولات</span>
                                 </div>
                                 {attemptsForSelectedTest.length > 0 ? (
                                     // Use grow to let it expand naturally
-                                    <div className="space-y-3 flex-grow">
+                                    <div className="space-y-4 flex-grow">
                                         {attemptsForSelectedTest.map(attempt => {
                                             const answeredCount = attempt.answers.filter(a => a.answer).length;
                                             const unanswered = attempt.totalQuestions - answeredCount;
                                             const incorrect = answeredCount - attempt.score;
                                             const percentage = Math.round((attempt.score / attempt.totalQuestions) * 100);
-                                            const { dayName, gregDate, hijriDate, time } = formatDateShort(attempt.date);
+                                            const { dayName, hijriDate, gregDate, time } = formatDateParts(attempt.date);
 
                                             return (
                                                 <div key={attempt.id} onClick={() => onReviewAttempt(attempt)} className="p-4 bg-zinc-800 rounded-lg border border-border hover:border-primary cursor-pointer transition-colors">
-                                                    <div className="flex justify-between items-start mb-2">
-                                                        <div className="flex items-start gap-3">
-                                                            <div className="bg-zinc-700 p-2 rounded-md hidden sm:block h-fit">
-                                                                <CalendarIcon className="w-5 h-5 text-text-muted" />
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-bold text-base text-text">{dayName}</p>
-                                                                <div className="flex flex-col gap-1 text-xs text-text-muted mt-1 font-bold">
-                                                                     <span>{hijriDate}</span>
-                                                                     <span>{gregDate}</span>
-                                                                     <span className="text-primary mt-1 block font-mono" dir="ltr">{time}</span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
+                                                    {/* Top Row: Date Info Distributed evenly across full width */}
+                                                    <div className="flex justify-between items-center border-b border-zinc-700 pb-3 mb-3 w-full text-lg font-bold text-zinc-300" dir="rtl">
+                                                        <span>{dayName}</span>
+                                                        <span>{hijriDate}</span>
+                                                        <span>{gregDate}</span>
+                                                        <span className="text-sky-400" dir="ltr">{time}</span>
+                                                    </div>
+
+                                                    <div className="flex justify-between items-center mb-2">
                                                         <div className="text-center">
-                                                            <p className={`font-bold text-xl ${percentage >= 50 ? 'text-green-400' : 'text-red-400'}`}>{percentage}%</p>
-                                                            <span className="text-sm text-text-muted">({attempt.score}/{attempt.totalQuestions})</span>
+                                                            <p className={`font-bold text-3xl ${percentage >= 50 ? 'text-green-400' : 'text-red-400'}`}>{toArabic(percentage)}%</p>
+                                                            <span className="text-sm text-text-muted">({toArabic(attempt.score)}/{toArabic(attempt.totalQuestions)})</span>
                                                         </div>
                                                     </div>
-                                                    <div className="flex justify-between items-center text-xs text-text-muted border-t border-zinc-700 pt-3 mt-1 gap-2 flex-wrap">
-                                                        <span className="truncate"><span className="text-green-400 font-semibold">{attempt.score}</span> صح</span>
-                                                        <span className="truncate"><span className="text-red-400 font-semibold">{incorrect}</span> خطأ</span>
-                                                        <span className="truncate"><span className="text-yellow-400 font-semibold">{unanswered}</span> متروك</span>
-                                                        <span className="truncate flex items-center gap-1"><ClockIcon className="w-3 h-3" /> {formatTime(attempt.durationSeconds)}</span>
+                                                    
+                                                    {/* Stats Row - Larger Text */}
+                                                    <div className="flex justify-between items-center text-text-muted border-t border-zinc-700 pt-3 mt-1 w-full text-xl font-medium">
+                                                        <span className="flex items-center gap-2"><span className="text-green-400 font-bold text-2xl">{toArabic(attempt.score)}</span> صح</span>
+                                                        <span className="flex items-center gap-2"><span className="text-red-400 font-bold text-2xl">{toArabic(incorrect)}</span> خطأ</span>
+                                                        <span className="flex items-center gap-2"><span className="text-yellow-400 font-bold text-2xl">{toArabic(unanswered)}</span> متروك</span>
+                                                        <span className="flex items-center gap-2 text-lg text-zinc-400"><ClockIcon className="w-5 h-5" /> {formatTime(attempt.durationSeconds)}</span>
                                                     </div>
                                                 </div>
                                             );
@@ -516,134 +668,38 @@ const ReviewView: React.FC<{
     onStartTest: (test: Test) => void;
     headerLeftSlot?: React.ReactNode;
     headerRightSlot?: React.ReactNode;
-    filters: ReviewFilterState;
+    filters: ReviewFilterState; 
     setFilters: React.Dispatch<React.SetStateAction<ReviewFilterState>>;
 }> = ({ section, data, onBack, onStartTest, headerLeftSlot, headerRightSlot, filters, setFilters }) => {
     
-    // Safety check to ensure we don't show invalid filters if section changed
+    // Safety check for section change
     useEffect(() => {
         if (section === 'verbal') {
             if ((filters.activeTab as any) === 'specialLaw') {
                  setFilters(prev => ({ ...prev, activeTab: 'all' }));
             }
-            if (filters.attributeFilters.type === 'specialLaw') {
-                setFilters(prev => ({ 
-                    ...prev, 
-                    attributeFilters: { ...prev.attributeFilters, type: 'all' } 
-                }));
-            }
         }
-    }, [section, filters.activeTab, filters.attributeFilters.type, setFilters]);
-
-    const [testSelectionInput, setTestSelectionInput] = useState('');
-    const [isTestSelectCustom, setIsTestSelectCustom] = useState(false);
+    }, [section, filters.activeTab, setFilters]);
 
     // Derived data for test selection
     const availableTestsForSelection = useMemo(() => {
         if (section === 'quantitative') {
             return data.tests.quantitative.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
         } else {
-            // Flatten all Verbal tests into a single list for selection logic
-            const verbal = data.tests.verbal;
-            let allTests: Test[] = [];
-            Object.keys(verbal).forEach(bankKey => {
-                Object.keys(verbal[bankKey]).forEach(catKey => {
-                    allTests = allTests.concat(verbal[bankKey][catKey]);
-                });
-            });
-            return allTests;
+            return [];
         }
     }, [data.tests, section]);
-
-    // Helper to parse test ranges
-    const handleTestSelectionInputBlur = () => {
-        if (!testSelectionInput.trim()) return;
-        
-        const newSelectedIds = new Set(filters.attributeFilters.selectedTestIds || []);
-        
-        // Check for range pattern "1-10"
-        const rangeMatch = testSelectionInput.match(/^(\d+)-(\d+)$/);
-        if (rangeMatch) {
-            const start = parseInt(rangeMatch[1]);
-            const end = parseInt(rangeMatch[2]);
-            const min = Math.min(start, end);
-            const max = Math.max(start, end);
-            
-            availableTestsForSelection.forEach(t => {
-                // Extract number from test name if possible
-                const numMatch = t.name.match(/\d+/);
-                if (numMatch) {
-                    const num = parseInt(numMatch[0]);
-                    if (num >= min && num <= max) {
-                        newSelectedIds.add(t.id);
-                    }
-                }
-            });
-        } else {
-            // Try to match by exact number or name inclusion
-            availableTestsForSelection.forEach(t => {
-                if (t.name.includes(testSelectionInput) || t.id === testSelectionInput) {
-                    newSelectedIds.add(t.id);
-                }
-            });
-        }
-        
+    
+    // Handlers for MultiSelectDropdown
+    const handleAttributeChange = (key: keyof ReviewFilterState['attributeFilters'], newValues: string[]) => {
         setFilters(prev => ({
             ...prev,
             activePanel: 'attribute',
             dateFilter: null,
             attributeFilters: {
                 ...prev.attributeFilters,
-                selectedTestIds: Array.from(newSelectedIds)
+                [key]: newValues
             }
-        }));
-        setTestSelectionInput('');
-        setIsTestSelectCustom(false);
-    };
-
-    const toggleTestSelection = (testId: string) => {
-        setFilters(prev => {
-            const current = new Set(prev.attributeFilters.selectedTestIds || []);
-            // If selecting a single test via dropdown, clear previous selections unless user logic implies adding
-            // For now, simpler to toggle. 
-            // The user wanted "choices... but space to write if I want more than one".
-            // So logic: Dropdown selects one. Typing adds range.
-            if (current.has(testId)) current.delete(testId);
-            else current.add(testId);
-            return {
-                ...prev,
-                activePanel: 'attribute',
-                dateFilter: null,
-                attributeFilters: {
-                    ...prev.attributeFilters,
-                    selectedTestIds: Array.from(current)
-                }
-            };
-        });
-    };
-
-    const handleTestSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const value = e.target.value;
-        if (value === 'custom') {
-            setIsTestSelectCustom(true);
-            return;
-        }
-        if (value === 'all') {
-            setFilters(prev => ({
-                ...prev,
-                activePanel: 'attribute',
-                dateFilter: null,
-                attributeFilters: { ...prev.attributeFilters, selectedTestIds: [] }
-            }));
-            return;
-        }
-        
-        // Select one specific test
-        setFilters(prev => ({
-            ...prev,
-            activePanel: 'attribute',
-            dateFilter: null,
-            attributeFilters: { ...prev.attributeFilters, selectedTestIds: [value] }
         }));
     };
 
@@ -662,7 +718,6 @@ const ReviewView: React.FC<{
     const filteredReviewTests = useMemo(() => {
         const sourceQuestions = data.reviewTests[section].flatMap(t => t.questions as FolderQuestion[]);
         
-        // Sort questions by addedDate (oldest first) before any filtering or chunking
         sourceQuestions.sort((a, b) => {
             if (!a.addedDate || !b.addedDate) return 0;
             return new Date(a.addedDate).getTime() - new Date(b.addedDate).getTime();
@@ -678,15 +733,14 @@ const ReviewView: React.FC<{
         } else {
             // "Other" tab logic
             if (filters.activePanel === 'time' && filters.dateFilter) {
-                const now = new Date();
-                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Starts at 00:00:00
+                 const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
                 
                 questionsToChunk = sourceQuestions.filter(q => {
                     if (!q.addedDate) return false;
                     const added = new Date(q.addedDate);
                     switch(filters.dateFilter) {
-                        case 'today':
-                            return added >= today;
+                        case 'today': return added >= today;
                         case 'week':
                             const lastWeek = new Date(today);
                             lastWeek.setDate(today.getDate() - 7);
@@ -695,7 +749,6 @@ const ReviewView: React.FC<{
                             const lastMonth = new Date(today);
                             lastMonth.setMonth(today.getMonth() - 1);
                             return added >= lastMonth;
-                        // For grouping cases, we filter all questions first then group them
                         case 'byDay':
                         case 'byMonth':
                             return true;
@@ -703,7 +756,7 @@ const ReviewView: React.FC<{
                     }
                 });
 
-                if (filters.dateFilter === 'byDay') {
+                 if (filters.dateFilter === 'byDay') {
                     const groupedByDay = questionsToChunk.reduce((acc, q) => {
                         const day = new Date(q.addedDate!).toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
                         if (!acc[day]) acc[day] = [];
@@ -719,7 +772,6 @@ const ReviewView: React.FC<{
                             name: chunks.length > 1 ? `${day} (الجزء ${i + 1})` : day,
                         }));
                     });
-
                 } else if (filters.dateFilter === 'byMonth') {
                     const groupedByMonth = questionsToChunk.reduce((acc, q) => {
                         const month = new Date(q.addedDate!).toLocaleDateString('ar-SA', { year: 'numeric', month: 'long' });
@@ -727,7 +779,6 @@ const ReviewView: React.FC<{
                         acc[month].push(q);
                         return acc;
                     }, {} as Record<string, FolderQuestion[]>);
-
                      return Object.entries(groupedByMonth).flatMap(([month, questions]) => {
                         const chunks = chunkQuestions(questions, 75);
                         return chunks.map((chunk, i) => ({
@@ -747,69 +798,101 @@ const ReviewView: React.FC<{
                     if (section === 'quantitative') {
                         // Quantitative specific filtering
                         let testMatch = true;
-                        if (selectedTestIds && selectedTestIds.length > 0) {
-                            const selectedTestNames = new Set(
+                        const isAllTests = !selectedTestIds || selectedTestIds.length === 0 || selectedTestIds.includes('all');
+                        if (!isAllTests) {
+                             const selectedTestNames = new Set(
                                 availableTestsForSelection.filter(t => selectedTestIds.includes(t.id)).map(t => t.name)
                             );
                             testMatch = !!q.sourceTest && selectedTestNames.has(q.sourceTest);
                         }
-                        const typeMatch = type === 'all' || q.reviewType === type;
+                        
+                        const isAllTypes = type.includes('all');
+                        const typeMatch = isAllTypes || (q.reviewType && type.includes(q.reviewType as any));
+                        
                         match = testMatch && typeMatch;
 
                     } else if (section === 'verbal') {
-                        // Verbal specific filtering (Bank & Category)
-                        const bankMatch = bank === 'all' || q.bankKey === bank;
-                        const catMatch = category === 'all' || q.categoryKey === category;
-                        const typeMatch = type === 'all' || q.reviewType === type;
+                        // Verbal specific filtering
+                        const isAllBanks = bank.includes('all');
+                        const bankMatch = isAllBanks || (q.bankKey && bank.includes(q.bankKey));
+                        
+                        const isAllCats = category.includes('all');
+                        const catMatch = isAllCats || (q.categoryKey && category.includes(q.categoryKey));
+                        
+                        const isAllTypes = type.includes('all');
+                        const typeMatch = isAllTypes || (q.reviewType && type.includes(q.reviewType as any));
+                        
                         match = bankMatch && catMatch && typeMatch;
                     }
-                    
                     return match;
                 });
             }
         }
-
         return chunkQuestions(questionsToChunk, 75);
 
     }, [data.reviewTests, section, filters, availableTestsForSelection]);
-
-    if (section === 'quantitative') {
-         // Allow access to review section if quantitative is enabled, even if empty
-         // But ensure filters are set if not empty
-    }
     
-    const renderActiveFilterText = () => {
-        if (filters.activeTab !== 'other' || !filters.activePanel) return null;
+    // Prepare Options for MultiSelect
+    const bankOptions = Object.entries(VERBAL_BANKS).map(([k, v]) => ({ value: k, label: v }));
+    bankOptions.unshift({ value: 'all', label: 'الكل' });
 
-        let text = [];
-        if(filters.activePanel === 'attribute') {
-            const { type, selectedTestIds, bank, category } = filters.attributeFilters;
-            
-            if (section === 'quantitative' && selectedTestIds && selectedTestIds.length > 0) {
-                text.push(`${selectedTestIds.length} اختبارات محددة`);
-            }
-            if (section === 'verbal') {
-                if (bank !== 'all') text.push(`البنك: ${VERBAL_BANKS[bank]}`);
-                if (category !== 'all') text.push(`القسم: ${VERBAL_CATEGORIES[category]}`);
-            }
-            
-            if (type === 'mistake') text.push("الأخطاء فقط");
-            if (type === 'delay') text.push("التأخير فقط");
-            if (type === 'specialLaw') text.push("قانون خاص");
-        }
-        if (text.length === 0) return null;
-        return <div className="text-center text-sm text-text-muted mb-4">التصنيف الحالي: <span className="font-bold text-primary">{text.join(' - ')}</span></div>;
-    };
-    
-    // Define tabs. Only include 'specialLaw' if section is Quantitative.
+    const categoryOptions = Object.entries(VERBAL_CATEGORIES).map(([k, v]) => ({ value: k, label: v }));
+    categoryOptions.unshift({ value: 'all', label: 'الكل' });
+
+    const typeOptions = [
+        { value: 'all', label: 'الكل' },
+        { value: 'mistake', label: 'الأخطاء' },
+        { value: 'delay', label: 'التأخير' },
+        ...(section === 'quantitative' ? [{ value: 'specialLaw', label: 'قانون خاص' }] : [])
+    ];
+
+    const testOptions = availableTestsForSelection.map(t => ({ value: t.id, label: t.name }));
+    testOptions.unshift({ value: 'all', label: 'الكل' });
+
+    // Tabs
     const reviewTabs = [
         { id: 'all', label: 'الكل' },
         { id: 'mistake', label: 'الأخطاء' },
         { id: 'delay', label: 'التأخير' },
-        // Conditionally add Special Law
         ...(section === 'quantitative' ? [{ id: 'specialLaw', label: 'قانون خاص' }] : []),
         { id: 'other', label: 'أخرى' }
     ] as const;
+
+    // Helper to render current filter summary
+    const renderFilterSummary = () => {
+        if (filters.activeTab !== 'other' || filters.activePanel !== 'attribute') return null;
+        
+        const { bank, category, selectedTestIds } = filters.attributeFilters;
+        
+        let summaryText = [];
+
+        if (section === 'verbal') {
+            const selectedBankNames = bank.includes('all') 
+                ? 'جميع البنوك' 
+                : bank.map(b => VERBAL_BANKS[b]).join('، ');
+                
+            const selectedCatNames = category.includes('all')
+                ? 'جميع الأقسام'
+                : category.map(c => VERBAL_CATEGORIES[c]).join('، ');
+                
+            summaryText.push(`البنوك: ${selectedBankNames}`);
+            summaryText.push(`الأقسام: ${selectedCatNames}`);
+        } else {
+             const selectedTestNames = (selectedTestIds.includes('all') || selectedTestIds.length === 0)
+                ? 'جميع الاختبارات'
+                : availableTestsForSelection.filter(t => selectedTestIds.includes(t.id)).map(t => t.name).join('، ');
+             summaryText.push(`الاختبارات: ${selectedTestNames}`);
+        }
+
+        return (
+            <div className="bg-sky-900/30 border border-sky-700/50 p-3 rounded-lg mb-4 text-sm text-sky-200">
+                <p className="font-bold mb-1">مصادر أسئلة المراجعة الحالية:</p>
+                <div className="flex flex-col gap-1">
+                    {summaryText.map((line, i) => <span key={i}>• {line}</span>)}
+                </div>
+            </div>
+        );
+    };
 
     return (
          <div className="bg-bg min-h-screen">
@@ -842,54 +925,32 @@ const ReviewView: React.FC<{
                                      ))}
                                 </div>
                             </div>
-                             {/* Attribute Filters - ONLY SHOW FOR QUANTITATIVE AS REQUESTED */}
+
+                             {/* Attribute Filters - QUANTITATIVE */}
                             {section === 'quantitative' && (
                                 <div 
                                     onClick={() => setFilters(prev => ({ ...prev, activePanel: 'attribute', dateFilter: null }))}
                                     className={`bg-zinc-800 p-3 rounded-md border ${filters.activePanel === 'attribute' ? 'border-accent' : 'border-zinc-700'} space-y-3 transition-colors cursor-pointer`}
                                 >
-                                    <h3 className="text-lg font-bold mb-2">التصنيف حسب الخصائص</h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4" onClick={e => e.stopPropagation()}>
-                                        
                                         <div>
-                                            <label className="block text-sm font-medium mb-1 text-text-muted">رقم الاختبار</label>
-                                            {!isTestSelectCustom ? (
-                                                <select
-                                                    onChange={handleTestSelectChange}
-                                                    className="w-full p-2 border rounded-md bg-zinc-700 text-slate-200 border-zinc-600 h-11"
-                                                >
-                                                    <option value="all">الكل</option>
-                                                    {availableTestsForSelection.map(t => (
-                                                        <option key={t.id} value={t.id}>{t.name}</option>
-                                                    ))}
-                                                    <option value="custom">-- مخصص / نطاق (كتابة) --</option>
-                                                </select>
-                                            ) : (
-                                                <input 
-                                                    type="text" 
-                                                    autoFocus
-                                                    value={testSelectionInput}
-                                                    onChange={e => setTestSelectionInput(e.target.value)}
-                                                    onBlur={handleTestSelectionInputBlur}
-                                                    onKeyDown={e => e.key === 'Enter' && handleTestSelectionInputBlur()}
-                                                    placeholder="رقم الاختبار"
-                                                    className="w-full p-2 border rounded-md bg-zinc-700 text-slate-200 border-zinc-600 h-11"
-                                                />
-                                            )}
+                                            <MultiSelectDropdown
+                                                label="رقم الاختبار"
+                                                options={testOptions}
+                                                selectedValues={filters.attributeFilters.selectedTestIds.length ? filters.attributeFilters.selectedTestIds : ['all']}
+                                                onChange={(vals) => handleAttributeChange('selectedTestIds', vals)}
+                                                showInput={true}
+                                                inputPlaceholder="اكتب نطاق (مثال: 1-10)"
+                                            />
                                         </div>
 
                                         <div>
-                                            <label className="block text-sm font-medium mb-1 text-text-muted">نوع السؤال</label>
-                                            <select 
-                                                onChange={e => setFilters(prev => ({...prev, activePanel: 'attribute', dateFilter: null, attributeFilters: {...prev.attributeFilters, type: e.target.value as ReviewFilterState['attributeFilters']['type']}}))} 
-                                                value={filters.attributeFilters.type} 
-                                                className="w-full p-2 border rounded-md bg-zinc-700 text-slate-200 border-zinc-600 h-11"
-                                            >
-                                                <option value="all">الكل</option>
-                                                <option value="mistake">الأخطاء فقط</option>
-                                                <option value="delay">التأخير فقط</option>
-                                                <option value="specialLaw">قانون خاص</option>
-                                            </select>
+                                            <MultiSelectDropdown
+                                                label="نوع السؤال"
+                                                options={typeOptions}
+                                                selectedValues={filters.attributeFilters.type as string[]}
+                                                onChange={(vals) => handleAttributeChange('type', vals)}
+                                            />
                                         </div>
                                     </div>
                                 </div>
@@ -903,46 +964,31 @@ const ReviewView: React.FC<{
                                 >
                                     <h3 className="text-lg font-bold mb-2">التصنيف حسب الخصائص</h3>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3" onClick={e => e.stopPropagation()}>
-                                        
                                         <div>
-                                            <label className="block text-sm font-medium mb-1 text-text-muted">البنك</label>
-                                            <select 
-                                                value={filters.attributeFilters.bank} 
-                                                onChange={e => setFilters(prev => ({...prev, activePanel: 'attribute', dateFilter: null, attributeFilters: {...prev.attributeFilters, bank: e.target.value}}))}
-                                                className="w-full p-2 border rounded-md bg-zinc-700 text-slate-200 border-zinc-600"
-                                            >
-                                                <option value="all">الكل</option>
-                                                {Object.entries(VERBAL_BANKS).map(([key, name]) => (
-                                                    <option key={key} value={key}>{name}</option>
-                                                ))}
-                                            </select>
+                                             <MultiSelectDropdown
+                                                label="البنك"
+                                                options={bankOptions}
+                                                selectedValues={filters.attributeFilters.bank}
+                                                onChange={(vals) => handleAttributeChange('bank', vals)}
+                                            />
                                         </div>
 
                                         <div>
-                                            <label className="block text-sm font-medium mb-1 text-text-muted">القسم</label>
-                                            <select 
-                                                value={filters.attributeFilters.category}
-                                                onChange={e => setFilters(prev => ({...prev, activePanel: 'attribute', dateFilter: null, attributeFilters: {...prev.attributeFilters, category: e.target.value}}))}
-                                                className="w-full p-2 border rounded-md bg-zinc-700 text-slate-200 border-zinc-600"
-                                            >
-                                                <option value="all">الكل</option>
-                                                {Object.entries(VERBAL_CATEGORIES).map(([key, name]) => (
-                                                    <option key={key} value={key}>{name}</option>
-                                                ))}
-                                            </select>
+                                             <MultiSelectDropdown
+                                                label="القسم"
+                                                options={categoryOptions}
+                                                selectedValues={filters.attributeFilters.category}
+                                                onChange={(vals) => handleAttributeChange('category', vals)}
+                                            />
                                         </div>
 
                                         <div>
-                                            <label className="block text-sm font-medium mb-1 text-text-muted">نوع السؤال</label>
-                                            <select 
-                                                value={filters.attributeFilters.type}
-                                                onChange={e => setFilters(prev => ({...prev, activePanel: 'attribute', dateFilter: null, attributeFilters: {...prev.attributeFilters, type: e.target.value as ReviewFilterState['attributeFilters']['type']}}))}
-                                                className="w-full p-2 border rounded-md bg-zinc-700 text-slate-200 border-zinc-600"
-                                            >
-                                                <option value="all">الكل</option>
-                                                <option value="mistake">الأخطاء فقط</option>
-                                                <option value="delay">التأخير فقط</option>
-                                            </select>
+                                            <MultiSelectDropdown
+                                                label="نوع السؤال"
+                                                options={typeOptions}
+                                                selectedValues={filters.attributeFilters.type as string[]}
+                                                onChange={(vals) => handleAttributeChange('type', vals)}
+                                            />
                                         </div>
                                     </div>
                                 </div>
@@ -950,7 +996,9 @@ const ReviewView: React.FC<{
                         </div>
                     )}
                 </div>
-                {renderActiveFilterText()}
+                
+                {renderFilterSummary()}
+
                 <div className="space-y-4">
                     {filteredReviewTests.map(test => (
                          <div key={test.id}
@@ -988,10 +1036,10 @@ const HistoryView: React.FC<{ history: TestAttempt[]; onBack: () => void; onRevi
         <main className="container mx-auto p-4">
             <div className="flex justify-between items-center mt-2 mb-6 border-b border-border pb-4">
                 <h2 className="text-xl font-bold">كل المحاولات</h2>
-                <span className="text-sm font-bold text-text-muted bg-zinc-700 px-3 py-1 rounded-full">{history.length} محاولات</span>
+                <span className="text-sm font-bold text-text-muted bg-zinc-700 px-3 py-1 rounded-full">{toArabic(history.length)} محاولات</span>
             </div>
             {history.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-4">
                     {history.map(attempt => {
                         const bankName = attempt.bankKey ? VERBAL_BANKS[attempt.bankKey] : '';
                         const categoryName = attempt.categoryKey ? VERBAL_CATEGORIES[attempt.categoryKey] : '';
@@ -1000,40 +1048,38 @@ const HistoryView: React.FC<{ history: TestAttempt[]; onBack: () => void; onRevi
                         const incorrect = answeredCount - attempt.score;
                         const percentage = Math.round((attempt.score / attempt.totalQuestions) * 100);
                         
-                        const { dayName, gregDate, hijriDate, time } = formatDateShort(attempt.date);
+                        const { dayName, hijriDate, gregDate, time } = formatDateParts(attempt.date);
 
                         return (
                         <div key={attempt.id} onClick={() => onReviewAttempt(attempt)} className="bg-surface p-4 rounded-lg border border-border cursor-pointer hover:border-primary transition-colors">
-                            <div className="flex justify-between items-start">
+                            
+                             {/* Date Info Distributed Evenly */}
+                            <div className="flex justify-between items-center border-b border-zinc-700 pb-3 mb-3 w-full text-lg font-bold text-zinc-300" dir="rtl">
+                                <span>{dayName}</span>
+                                <span>{hijriDate}</span>
+                                <span>{gregDate}</span>
+                                <span className="text-sky-400" dir="ltr">{time}</span>
+                            </div>
+
+                            <div className="flex justify-between items-start mb-2">
                                 <div>
-                                    <h3 className="font-bold text-lg text-text mb-2">{attempt.testName}</h3>
-                                     <div className="flex items-start gap-3 mb-2">
-                                        <div className="bg-zinc-700 p-2 rounded-md h-fit">
-                                            <CalendarIcon className="w-5 h-5 text-text-muted" />
-                                        </div>
-                                        <div>
-                                            <p className="font-bold text-text">{dayName}</p>
-                                            <div className="flex flex-col gap-1 text-sm text-text-muted mt-1 font-bold">
-                                                 <span>{hijriDate}</span>
-                                                 <span>{gregDate}</span>
-                                                 <span className="text-primary mt-1 block font-mono" dir="ltr">{time}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <p className="text-sm text-text-muted">
+                                    <h3 className="font-bold text-2xl text-text mb-2">{attempt.testName}</h3>
+                                    <p className="text-base text-text-muted">
                                         {attempt.section === 'verbal' && bankName && categoryName ? `${bankName} - ${categoryName}` : (attempt.section === 'verbal' ? 'لفظي' : 'كمي')}
                                     </p>
                                 </div>
                                 <div className="text-center">
-                                    <p className={`font-bold text-2xl ${percentage >= 50 ? 'text-green-400' : 'text-red-400'}`}>{percentage}%</p>
-                                    <p className="text-xs text-text-muted">({attempt.score}/{attempt.totalQuestions})</p>
+                                    <p className={`font-bold text-3xl ${percentage >= 50 ? 'text-green-400' : 'text-red-400'}`}>{toArabic(percentage)}%</p>
+                                    <p className="text-sm text-text-muted">({toArabic(attempt.score)}/{toArabic(attempt.totalQuestions)})</p>
                                 </div>
                             </div>
-                             <div className="flex justify-between items-center text-sm text-text-muted border-t border-border mt-3 pt-3 flex-wrap gap-2">
-                                <span><span className="text-green-400 font-semibold">{attempt.score}</span> صحيح</span>
-                                <span><span className="text-red-400 font-semibold">{incorrect}</span> خاطئ</span>
-                                <span><span className="text-yellow-400 font-semibold">{unanswered}</span> متروك</span>
-                                <span className="flex items-center gap-1"><ClockIcon className="w-4 h-4"/> {formatTime(attempt.durationSeconds)}</span>
+
+                            {/* Stats Row - Larger Text */}
+                            <div className="flex justify-between items-center text-text-muted border-t border-border mt-3 pt-3 w-full text-xl font-medium">
+                                <span className="flex items-center gap-2"><span className="text-green-400 font-bold text-2xl">{toArabic(attempt.score)}</span> صحيح</span>
+                                <span className="flex items-center gap-2"><span className="text-red-400 font-bold text-2xl">{toArabic(incorrect)}</span> خاطئ</span>
+                                <span className="flex items-center gap-2"><span className="text-yellow-400 font-bold text-2xl">{toArabic(unanswered)}</span> متروك</span>
+                                <span className="flex items-center gap-2 text-lg text-zinc-400"><ClockIcon className="w-5 h-5"/> {formatTime(attempt.durationSeconds)}</span>
                             </div>
                         </div>
                     )})}
@@ -1048,7 +1094,6 @@ const HistoryView: React.FC<{ history: TestAttempt[]; onBack: () => void; onRevi
 const App: React.FC = () => {
     const [currentUserKey, setCurrentUserKey] = useState<string | null>(authService.getCurrentUser());
     const [previewUserKey, setPreviewUserKey] = useState<string | null>(null);
-    // New state to remember a user who timed out for quick login
     const [recentUserKey, setRecentUserKey] = useState<string | null>(null);
 
     const activeUserKey = previewUserKey || currentUserKey;
@@ -1066,34 +1111,27 @@ const App: React.FC = () => {
 
     // Session Management Logic
     useEffect(() => {
-        // On mount, check if session is valid (less than 10 mins)
         const lastActive = localStorage.getItem('lastActiveTime');
         const userKey = authService.getCurrentUser();
-        
         if (userKey && lastActive) {
             const diff = Date.now() - parseInt(lastActive);
-            const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 minutes
-            
+            const SESSION_TIMEOUT = 10 * 60 * 1000; 
             if (diff > SESSION_TIMEOUT) {
-                // Session timed out
                 setRecentUserKey(userKey);
                 authService.logout();
                 setCurrentUserKey(null);
                 setPageHistory(['auth']);
             } else {
-                 // Update timestamp
                  localStorage.setItem('lastActiveTime', Date.now().toString());
             }
         }
     }, []);
 
-    // Update last active time on any page change
     useEffect(() => {
         if (currentUserKey) {
             localStorage.setItem('lastActiveTime', Date.now().toString());
         }
     }, [page, currentUserKey]);
-
 
     const navigate = (newPage: string, replace = false) => {
         setPageHistory(prev => {
@@ -1116,7 +1154,6 @@ const App: React.FC = () => {
         });
     };
 
-
     const [userMode, setUserMode] = useState<'training' | 'review' | null>(null);
     const [selectedSection, setSelectedSection] = useState<Section | null>(null);
     const [currentTest, setCurrentTest] = useState<Test | null>(null);
@@ -1124,47 +1161,46 @@ const App: React.FC = () => {
     const [currentAttempt, setCurrentAttempt] = useState<TestAttempt | null>(null);
     const [attemptToReview, setAttemptToReview] = useState<TestAttempt | null>(null);
     const [summaryReturnPage, setSummaryReturnPage] = useState<string>('section');
-    
     const [userAnswers, setUserAnswers] = useState<UserAnswer[]>([]);
     const [elapsedTime, setElapsedTime] = useState(0);
-
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
     const [isPreviewMode, setIsPreviewMode] = useState(false);
-
     const [openBankKeys, setOpenBankKeys] = useState<Set<string>>(new Set());
     const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
-
     const [pendingSession, setPendingSession] = useState<SessionState | null>(null);
     
     const [reviewFilters, setReviewFilters] = useState<ReviewFilterState>({
         activeTab: 'all',
         activePanel: null,
         dateFilter: null,
-        attributeFilters: { bank: 'all', category: 'all', type: 'all' },
+        attributeFilters: { bank: ['all'], category: ['all'], type: ['all'], selectedTestIds: ['all'] },
     });
 
-    const { data, addTest, addQuestionsToTest, deleteTest, addAttemptToHistory, deleteUserData, addDelayedQuestionToReview, addSpecialLawQuestionToReview, reviewedQuestionIds } = useAppData(activeUserKey, isDevUser, isPreviewMode);
+    const { data, isLoading: isDataLoading, addTest, addQuestionsToTest, deleteTest, addAttemptToHistory, deleteUserData, addDelayedQuestionToReview, addSpecialLawQuestionToReview, reviewedQuestionIds } = useAppData(activeUserKey, isDevUser, isPreviewMode);
     
+    // --- INTEGRATE PROCESSOR HOOK HERE ---
+    const processor = useQuantitativeProcessor(addTest, addQuestionsToTest);
+    // -------------------------------------
+
     // Session Loading (Modified to check for active test session after login)
     useEffect(() => {
-        if (activeUserKey) {
-            const saved = sessionService.loadSessionState(activeUserKey);
-            if (saved) {
-                // Always restore general UI state
-                setOpenBankKeys(new Set(saved.openBankKeys || []));
-                setSelectedTestId(saved.selectedTestId || null);
-                setUserMode(saved.userMode || null);
-                if (saved.reviewFilters) setReviewFilters(saved.reviewFilters);
-
-                // If there is an active test session, prompt to resume
-                if (saved.currentTest) {
-                    setPendingSession(saved);
+        const loadSession = async () => {
+            if (activeUserKey) {
+                const saved = await sessionService.loadSessionState(activeUserKey);
+                if (saved) {
+                    setOpenBankKeys(new Set(saved.openBankKeys || []));
+                    setSelectedTestId(saved.selectedTestId || null);
+                    setUserMode(saved.userMode || null);
+                    if (saved.reviewFilters) setReviewFilters(saved.reviewFilters);
+                    if (saved.currentTest) {
+                        setPendingSession(saved);
+                    }
                 }
             }
-        }
+        };
+        loadSession();
     }, [activeUserKey]);
 
-    // Session Saving
     useEffect(() => {
         if (activeUserKey) {
             const stateToSave: SessionState = {
@@ -1173,6 +1209,7 @@ const App: React.FC = () => {
                 openBankKeys: Array.from(openBankKeys), selectedTestId,
                 reviewFilters,
             };
+            // Async save (fire and forget for now, but safer in real apps)
             sessionService.saveSessionState(stateToSave, activeUserKey);
         }
     }, [pageHistory, selectedSection, userMode, currentTest, currentTestContext, userAnswers, elapsedTime, openBankKeys, selectedTestId, activeUserKey, reviewFilters]);
@@ -1188,18 +1225,17 @@ const App: React.FC = () => {
 
     const handleLoginSuccess = (user: User, rememberMe: boolean) => {
         const userKey = user.email === 'guest@local.session' ? `guest|${Date.now()}` : `${user.email}|${user.username}`;
-        // If "remember me" was checked or just logged in, we set the current user in local storage
         if (rememberMe) {
             authService.setCurrentUser(userKey);
         }
         localStorage.setItem('lastActiveTime', Date.now().toString());
         setCurrentUserKey(userKey);
-        setRecentUserKey(null); // Clear recent user since we logged in
+        setRecentUserKey(null);
         setPageHistory(['home']);
     };
 
     const handleLogout = () => {
-        authService.logout(); // Clears main key
+        authService.logout();
         localStorage.removeItem('lastActiveTime');
         setCurrentUserKey(null);
         setPreviewUserKey(null);
@@ -1220,13 +1256,15 @@ const App: React.FC = () => {
     };
     
     const handleStartTest = (test: Test, bankKey?: string, categoryKey?: string, returnTo?: string) => {
-        clearTestSession(); // Start fresh
+        clearTestSession();
         setCurrentTest(test);
         setCurrentTestContext({ bankKey, categoryKey });
         setSelectedTestId(test.id);
-        setReturnPath(returnTo || null);
-        
-        // If started from quantitative management, we need to ensure selectedSection is set
+        if (!returnTo) {
+             setReturnPath('section');
+        } else {
+             setReturnPath(returnTo);
+        }
         if (!selectedSection && test.questions[0]?.questionImage) {
              setSelectedSection('quantitative');
         }
@@ -1234,9 +1272,7 @@ const App: React.FC = () => {
     };
 
     const handleFinishTest = (answers: UserAnswer[], durationSeconds: number) => {
-        // Fallback for section if missing (e.g. started from Management view)
         const section = selectedSection || (currentTest?.questions[0]?.questionImage ? 'quantitative' : 'verbal');
-
         if (!currentTest) return;
         
         const score = answers.reduce((count, userAnswer) => {
@@ -1264,9 +1300,7 @@ const App: React.FC = () => {
         }
         
         setCurrentAttempt(newAttempt);
-        setAttemptToReview(newAttempt); // Also set for direct review
-        
-        // Determine proper return path for Summary "Back"
+        setAttemptToReview(newAttempt);
         if (returnPath) {
              setSummaryReturnPage(returnPath);
         } else if (currentTest.id.includes('review_')) {
@@ -1274,9 +1308,7 @@ const App: React.FC = () => {
         } else {
             setSummaryReturnPage(userMode === 'training' ? 'section' : 'review');
         }
-        
         clearTestSession();
-        // Use replace: true to remove 'takeTest' from history, so 'Back' from Summary goes to 'Section'
         navigate('summary', true);
     };
     
@@ -1296,261 +1328,223 @@ const App: React.FC = () => {
         setPageHistory(savedState.pageHistory || ['takeTest']);
         setPendingSession(null);
     }
-    
-    if (pendingSession) {
-        return (
-            <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 backdrop-blur-sm">
-                <div className="bg-surface rounded-lg p-8 m-4 max-w-md w-full text-center shadow-2xl border border-border">
-                    <div className="mb-4">
-                        <ClockIcon className="w-16 h-16 mx-auto text-primary animate-pulse"/>
-                    </div>
-                    <h2 className="text-xl font-bold mb-4">استئناف الاختبار السابق</h2>
-                    <p className="text-text-muted mb-6">
-                        يبدو أنك كنت في منتصف اختبار <strong>{pendingSession.currentTest?.name}</strong>.
-                        <br/>
-                        هل تريد العودة إلى حيث توقفت؟
-                    </p>
-                    <div className="flex justify-center gap-4">
-                        <button onClick={() => { clearTestSession(); setPendingSession(null); }} className="px-6 py-2 bg-zinc-600 text-slate-200 rounded-md hover:bg-zinc-500 transition-colors font-semibold">
-                            لا، بدء جديد
-                        </button>
-                        <button onClick={() => handleResumeTest(pendingSession)} className="px-6 py-2 text-white rounded-md bg-accent hover:opacity-90 transition-colors font-bold shadow-lg shadow-accent/20">
-                            نعم، إكمال الاختبار
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )
-    }
 
-    if (showLogoutConfirm) {
-         return (
-            <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 backdrop-blur-sm">
-                <div className="bg-surface rounded-lg p-8 m-4 max-w-sm w-full text-center shadow-2xl border border-border">
-                    <h2 className="text-xl font-bold mb-4">تأكيد تسجيل الخروج</h2>
-                    <p className="text-text-muted mb-6">هل أنت متأكد أنك تريد تسجيل الخروج؟</p>
-                    <div className="flex justify-center gap-4">
-                        <button onClick={() => setShowLogoutConfirm(false)} className="px-6 py-2 bg-zinc-600 text-slate-200 rounded-md hover:bg-zinc-500 transition-colors font-semibold">إلغاء</button>
-                        <button onClick={handleLogout} className="px-6 py-2 text-white rounded-md bg-red-600 hover:bg-red-700 transition-colors font-semibold">تسجيل الخروج</button>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-    
+    // --- RENDER LOGIC WITH GLOBAL PROCESSING INDICATOR ---
+    const showGlobalProcessing = processor.isProcessing && page !== 'quantitativeManagement';
+    const activeJob = processor.queue.find(j => j.status === 'processing');
+    const totalJobs = processor.queue.filter(j => j.status === 'pending' || j.status === 'processing').length;
+
     const activeUser = previewingUser || currentUser;
+
+    const commonHeaderRightSlot = activeUser ? (
+        <UserMenu user={activeUser} onLogout={() => setShowLogoutConfirm(true)} />
+    ) : null;
 
     if (!currentUserKey || !activeUser) {
         return <AuthView onLoginSuccess={handleLoginSuccess} recentUser={recentUser} />;
     }
 
-    if (page === 'home') {
-        return <HomeView
-            username={activeUser.username}
-            onSelectUserMode={(mode) => { setUserMode(mode); navigate('modeSelection'); }}
-            onLogout={() => setShowLogoutConfirm(true)}
-            onGoToAdmin={() => navigate('admin')}
-            onGoToSiteManagement={() => navigate('siteManagement')}
-            onGoToVerbalManagement={() => navigate('verbalManagement')}
-            onGoToQuantitativeManagement={() => navigate('quantitativeManagement')}
-            isDevUser={isDevUser}
-            isPreviewMode={isPreviewMode}
-            onTogglePreviewMode={handleTogglePreviewMode}
-            previewingUser={previewingUser}
-        />;
-    }
-    
-    if (page === 'modeSelection' && userMode) {
-        return <ModeSelectionView 
-            userMode={userMode} 
-            onBack={goBack} 
-            onSelectSection={(section, mode) => { 
-                setSelectedSection(section); 
-                setUserMode(mode);
-                navigate(mode === 'training' ? 'section' : 'review'); 
-            }}
-            settings={settings}
-            user={activeUser}
-            onLogout={() => setShowLogoutConfirm(true)}
-        />
-    }
-    
-    const sectionHeaderLeftSlot = (
-         <div className="flex items-center gap-4">
-            <button onClick={goBack} className="p-2 rounded-full hover:bg-zinc-700 transition-colors"><ArrowRightIcon className="w-6 h-6 text-text-muted"/></button>
-            <button 
-                onClick={() => {
-                    // Correctly update userMode when switching between Training and Review
-                    const targetMode = page === 'section' ? 'review' : 'training';
-                    setUserMode(targetMode);
-                    navigate(targetMode === 'training' ? 'section' : 'review');
-                }} 
-                className="px-3 py-2 text-sm font-bold rounded-md transition-colors bg-zinc-700 hover:bg-zinc-600"
-            >
-                {page === 'section' ? 'الانتقال إلى المراجعة' : 'الانتقال إلى التدريب'}
-            </button>
-        </div>
-    );
-
-    const commonHeaderRightSlot = (
-        <UserMenu user={activeUser} onLogout={() => setShowLogoutConfirm(true)}>
-             <button onClick={() => navigate('history')} className="px-3 py-2 text-sm font-bold rounded-md transition-all bg-zinc-700 hover:bg-zinc-600 border border-zinc-600 hover:border-accent hover:shadow-lg hover:shadow-accent/30">سجل المحاولات</button>
-        </UserMenu>
-    );
-    
-    if (page === 'review' && selectedSection) {
-        return <ReviewView
-            section={selectedSection}
-            data={data}
-            onBack={goBack}
-            onStartTest={(test) => handleStartTest(test)}
-            headerLeftSlot={sectionHeaderLeftSlot}
-            headerRightSlot={commonHeaderRightSlot}
-            filters={reviewFilters}
-            setFilters={setReviewFilters}
-        />
-    }
-
-    if (page === 'section' && selectedSection) {
-        return <SectionView 
-            section={selectedSection}
-            data={data}
-            onBack={() => { goBack(); setSelectedTestId(null); }}
-            onStartTest={handleStartTest}
-            onReviewAttempt={(attempt) => handleStartReviewAttempt(attempt)}
-            headerLeftSlot={sectionHeaderLeftSlot}
-            headerRightSlot={commonHeaderRightSlot}
-            openBankKeys={openBankKeys}
-            onToggleBank={(key) => setOpenBankKeys(prev => {
-                const next = new Set(prev);
-                if (next.has(key)) next.delete(key);
-                else next.add(key);
-                return next;
-            })}
-            selectedTestId={selectedTestId}
-            onSelectTest={(test, bank, cat) => setSelectedTestId(test.id)}
-        />
-    }
-    
-    if (page === 'takeTest' && currentTest) {
-        // Note: selectedSection might be null if coming from Management view directly.
-        // We fallback to 'quantitative' inside TakeTest or handleFinish if needed, but for display it's fine.
-        return <TakeTestView 
-            test={currentTest} 
-            onFinishTest={handleFinishTest} 
-            onBack={() => {
-                if (returnPath) {
-                    navigate(returnPath, true);
-                } else {
-                    goBack();
-                }
-            }}
-            initialAnswers={userAnswers}
-            initialElapsedTime={elapsedTime}
-            onStateChange={(answers, time) => { setUserAnswers(answers); setElapsedTime(time); }}
-            onAddDelayedReview={(q, qIndex) => selectedSection && addDelayedQuestionToReview(selectedSection, q, {bankKey: currentTestContext.bankKey, categoryKey: currentTestContext.categoryKey, testName: currentTest.name, originalQuestionIndex: qIndex})}
-            onAddSpecialLawReview={(q, qIndex) => selectedSection && addSpecialLawQuestionToReview(selectedSection, q, {bankKey: currentTestContext.bankKey, categoryKey: currentTestContext.categoryKey, testName: currentTest.name, originalQuestionIndex: qIndex})}
-            reviewedQuestionIds={reviewedQuestionIds}
-        />;
-    }
-
-    if (page === 'history') {
-        return <HistoryView 
-            history={data.history} 
-            onBack={goBack} 
-            onReviewAttempt={(attempt) => handleStartReviewAttempt(attempt)}
-            user={activeUser}
-            onLogout={() => setShowLogoutConfirm(true)}
-        />;
-    }
-    
-    const summaryData = currentAttempt || attemptToReview;
-    if (page === 'summary' && summaryData) {
-        return <SummaryView 
-            attempt={summaryData} 
-            onBack={() => { 
-                // Logic: Go back to where we started and clear stack to pretend we never entered test mode
-                if (returnPath) {
-                    navigate(returnPath, true); 
-                } else {
-                     // Ensure we go back to the correct section mode (Review vs Training)
-                     // based on current userMode state
-                     const targetPage = userMode === 'training' ? 'section' : 'review';
-                     navigate(targetPage, true);
-                }
-                setCurrentAttempt(null); 
-                setAttemptToReview(null); 
-                setReturnPath(null);
-            }} 
-            onReview={(attempt) => { setAttemptToReview(attempt); navigate('reviewAttempt'); }}
-            user={activeUser}
-            onLogout={() => setShowLogoutConfirm(true)}
-        />;
-    }
-    
-    if (page === 'reviewAttempt' && attemptToReview) {
-        return <TakeTestView
-             test={{ id: attemptToReview.testId, name: attemptToReview.testName, questions: attemptToReview.questions }}
-             reviewAttempt={attemptToReview}
-             onFinishTest={()=>{}} // Not applicable in review mode
-             reviewedQuestionIds={reviewedQuestionIds}
-             onBackToSummary={() => navigate('summary', true)}
-             onBackToSection={() => {
-                 // Force navigation back to the section view, effectively skipping summary in history
-                 if (returnPath) {
-                    navigate(returnPath, true);
-                 } else {
-                    const targetPage = userMode === 'training' ? 'section' : 'review';
-                    navigate(targetPage, true);
-                 }
-                 setAttemptToReview(null);
-                 setReturnPath(null);
-             }}
-        />;
-    }
-
-    if (page === 'admin') {
-        return <AdminView
-            onBack={goBack}
-            onPreviewUser={(userKey) => { setPreviewUserKey(userKey); setIsPreviewMode(true); navigate('home', true); }}
-            onDeleteUser={(userKey) => { deleteUserData(userKey); }}
-        />
-    }
-    
-    if (page === 'siteManagement') {
-        return <SiteManagementView onBack={goBack} onUpdateSettings={(newSettings) => setSettings(newSettings)} />
-    }
-    
-    if (page === 'verbalManagement') {
-        return <VerbalManagementView
-            data={data}
-            onBack={goBack}
-            onAddTest={addTest}
-            onAddQuestionsToTest={addQuestionsToTest}
-            onDeleteTest={deleteTest}
-         />
-    }
-    
-    if (page === 'quantitativeManagement') {
-        // Now passing props instead of relying on internal useAppData
-        return <QuantitativeManagementView 
-            onBack={goBack} 
-            onStartTest={(test, returnTo) => handleStartTest(test, undefined, undefined, returnTo || 'quantitativeManagement')}
-            data={data}
-            onAddTest={addTest}
-            onAddQuestionsToTest={addQuestionsToTest}
-            onDeleteTest={deleteTest}
-        />
+    if (isDataLoading) {
+        return (
+            <div className="min-h-screen bg-bg flex items-center justify-center">
+                <div className="text-center">
+                    <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                    <p className="text-lg text-text-muted">جارٍ تحميل البيانات...</p>
+                </div>
+            </div>
+        );
     }
 
     return (
-        <div className="bg-bg min-h-screen flex items-center justify-center text-center">
-            <div>
-                <h1 className="text-2xl font-bold">حدث خطأ ما</h1>
-                <p className="text-text-muted">الصفحة المطلوبة غير متوفرة.</p>
-                <button onClick={() => { setPageHistory(['home']); }} className="mt-4 px-6 py-2 bg-primary text-white rounded-md">العودة للصفحة الرئيسية</button>
-            </div>
-        </div>
+        <>
+            {/* Global Processing Indicator */}
+            {showGlobalProcessing && activeJob && (
+                <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-8 md:w-80 bg-surface border border-primary/50 rounded-lg shadow-2xl p-4 z-50 animate-slide-up">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary border-t-transparent"></div>
+                            <span className="font-bold text-sm text-primary">جارٍ معالجة الاختبارات...</span>
+                        </div>
+                        <span className="text-xs text-text-muted">{totalJobs} متبقي</span>
+                    </div>
+                    <div className="text-xs text-text-muted mb-1 truncate">{activeJob.file.name}</div>
+                    <div className="w-full bg-zinc-700 rounded-full h-1.5 overflow-hidden">
+                        <div className="bg-primary h-full transition-all duration-300" style={{ width: `${activeJob.progress}%` }}></div>
+                    </div>
+                </div>
+            )}
+            
+             {/* Pending Session Modal */}
+            {pendingSession && (
+                <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 backdrop-blur-sm">
+                    <div className="bg-surface rounded-lg p-8 m-4 max-w-md w-full text-center shadow-2xl border border-border">
+                        <div className="mb-4">
+                            <ClockIcon className="w-16 h-16 mx-auto text-primary animate-pulse"/>
+                        </div>
+                        <h2 className="text-xl font-bold mb-4">استئناف الاختبار السابق</h2>
+                        <p className="text-text-muted mb-6">
+                            يبدو أنك كنت في منتصف اختبار <strong>{pendingSession.currentTest?.name}</strong>.
+                            <br/>
+                            هل تريد العودة إلى حيث توقفت؟
+                        </p>
+                        <div className="flex justify-center gap-4">
+                            <button onClick={() => { clearTestSession(); setPendingSession(null); }} className="px-6 py-2 bg-zinc-600 text-slate-200 rounded-md hover:bg-zinc-500 transition-colors font-semibold">
+                                لا، بدء جديد
+                            </button>
+                            <button onClick={() => handleResumeTest(pendingSession)} className="px-6 py-2 text-white rounded-md bg-accent hover:opacity-90 transition-colors font-bold shadow-lg shadow-accent/20">
+                                نعم، إكمال الاختبار
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Logout Confirm */}
+             {showLogoutConfirm && (
+                <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 backdrop-blur-sm">
+                    <div className="bg-surface rounded-lg p-8 m-4 max-w-sm w-full text-center shadow-2xl border border-border">
+                        <h2 className="text-xl font-bold mb-4">تأكيد تسجيل الخروج</h2>
+                        <p className="text-text-muted mb-6">هل أنت متأكد أنك تريد تسجيل الخروج؟</p>
+                        <div className="flex justify-center gap-4">
+                            <button onClick={() => setShowLogoutConfirm(false)} className="px-6 py-2 bg-zinc-600 text-slate-200 rounded-md hover:bg-zinc-500 transition-colors font-semibold">إلغاء</button>
+                            <button onClick={handleLogout} className="px-6 py-2 text-white rounded-md bg-red-600 hover:bg-red-700 transition-colors font-semibold">تسجيل الخروج</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {page === 'home' && (
+                <HomeView
+                    username={activeUser.username}
+                    onSelectUserMode={(mode) => { setUserMode(mode); navigate('modeSelection'); }}
+                    onLogout={() => setShowLogoutConfirm(true)}
+                    onGoToAdmin={() => navigate('admin')}
+                    onGoToSiteManagement={() => navigate('siteManagement')}
+                    onGoToVerbalManagement={() => navigate('verbalManagement')}
+                    onGoToQuantitativeManagement={() => navigate('quantitativeManagement')}
+                    isDevUser={isDevUser}
+                    isPreviewMode={isPreviewMode}
+                    onTogglePreviewMode={handleTogglePreviewMode}
+                    previewingUser={previewingUser}
+                />
+            )}
+
+            {page === 'modeSelection' && userMode && (
+                <ModeSelectionView 
+                    userMode={userMode} 
+                    onBack={goBack} 
+                    onSelectSection={(section, mode) => { 
+                        setSelectedSection(section); 
+                        setUserMode(mode);
+                        navigate(mode === 'training' ? 'section' : 'review'); 
+                    }}
+                    settings={settings}
+                    user={activeUser}
+                    onLogout={() => setShowLogoutConfirm(true)}
+                />
+            )}
+
+            {page === 'review' && selectedSection && (
+                <ReviewView
+                    section={selectedSection}
+                    data={data}
+                    onBack={goBack}
+                    onStartTest={(test) => handleStartTest(test)}
+                    headerLeftSlot={
+                         <div className="flex items-center gap-4">
+                            <button onClick={goBack} className="p-2 rounded-full hover:bg-zinc-700 transition-colors"><ArrowRightIcon className="w-6 h-6 text-text-muted"/></button>
+                            <button onClick={() => { const targetMode = 'training'; setUserMode(targetMode); navigate('section'); }} className="px-3 py-2 text-sm font-bold rounded-md transition-colors bg-zinc-700 hover:bg-zinc-600">الانتقال إلى التدريب</button>
+                        </div>
+                    }
+                    headerRightSlot={commonHeaderRightSlot}
+                    filters={reviewFilters}
+                    setFilters={setReviewFilters}
+                />
+            )}
+
+            {page === 'section' && selectedSection && (
+                 <SectionView 
+                    section={selectedSection}
+                    data={data}
+                    onBack={() => { goBack(); setSelectedTestId(null); }}
+                    onStartTest={handleStartTest}
+                    onReviewAttempt={(attempt) => handleStartReviewAttempt(attempt)}
+                    headerLeftSlot={
+                         <div className="flex items-center gap-4">
+                            <button onClick={goBack} className="p-2 rounded-full hover:bg-zinc-700 transition-colors"><ArrowRightIcon className="w-6 h-6 text-text-muted"/></button>
+                            <button onClick={() => { const targetMode = 'review'; setUserMode(targetMode); navigate('review'); }} className="px-3 py-2 text-sm font-bold rounded-md transition-colors bg-zinc-700 hover:bg-zinc-600">الانتقال إلى المراجعة</button>
+                        </div>
+                    }
+                    headerRightSlot={commonHeaderRightSlot}
+                    openBankKeys={openBankKeys}
+                    onToggleBank={(key) => setOpenBankKeys(prev => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; })}
+                    selectedTestId={selectedTestId}
+                    onSelectTest={(test, bank, cat) => setSelectedTestId(test.id)}
+                />
+            )}
+
+            {page === 'takeTest' && currentTest && (
+                <TakeTestView 
+                    test={currentTest} 
+                    onFinishTest={handleFinishTest} 
+                    onBack={() => { if (returnPath) navigate(returnPath, true); else goBack(); }}
+                    initialAnswers={userAnswers}
+                    initialElapsedTime={elapsedTime}
+                    onStateChange={(answers, time) => { setUserAnswers(answers); setElapsedTime(time); }}
+                    onAddDelayedReview={(q, qIndex) => selectedSection && addDelayedQuestionToReview(selectedSection, q, {bankKey: currentTestContext.bankKey, categoryKey: currentTestContext.categoryKey, testName: currentTest.name, originalQuestionIndex: qIndex})}
+                    onAddSpecialLawReview={(q, qIndex) => selectedSection && addSpecialLawQuestionToReview(selectedSection, q, {bankKey: currentTestContext.bankKey, categoryKey: currentTestContext.categoryKey, testName: currentTest.name, originalQuestionIndex: qIndex})}
+                    reviewedQuestionIds={reviewedQuestionIds}
+                />
+            )}
+            
+            {page === 'history' && <HistoryView history={data.history} onBack={goBack} onReviewAttempt={(attempt) => handleStartReviewAttempt(attempt)} user={activeUser} onLogout={() => setShowLogoutConfirm(true)} />}
+            
+            {page === 'summary' && (currentAttempt || attemptToReview) && (
+                <SummaryView 
+                    attempt={currentAttempt || attemptToReview!} 
+                    onBack={() => { 
+                        if (summaryReturnPage === 'section') { if (userMode !== 'training') setUserMode('training'); navigate('section', true); }
+                        else if (summaryReturnPage === 'review') { if (userMode !== 'review') setUserMode('review'); navigate('review', true); }
+                        else { navigate(summaryReturnPage, true); }
+                        setCurrentAttempt(null); setAttemptToReview(null); setReturnPath(null);
+                    }} 
+                    onReview={(attempt) => { setAttemptToReview(attempt); navigate('reviewAttempt'); }}
+                    user={activeUser}
+                    onLogout={() => setShowLogoutConfirm(true)}
+                />
+            )}
+
+            {page === 'reviewAttempt' && attemptToReview && (
+                 <TakeTestView
+                     test={{ id: attemptToReview.testId, name: attemptToReview.testName, questions: attemptToReview.questions }}
+                     reviewAttempt={attemptToReview}
+                     onFinishTest={()=>{}} 
+                     reviewedQuestionIds={reviewedQuestionIds}
+                     onBackToSummary={() => navigate('summary', true)}
+                     onBackToSection={() => { const targetPage = userMode === 'training' ? 'section' : 'review'; navigate(targetPage, true); setAttemptToReview(null); setReturnPath(null); }}
+                />
+            )}
+            
+            {page === 'admin' && <AdminView onBack={goBack} onPreviewUser={(userKey) => { setPreviewUserKey(userKey); setIsPreviewMode(true); navigate('home', true); }} onDeleteUser={(userKey) => { deleteUserData(userKey); }} />}
+            {page === 'siteManagement' && <SiteManagementView onBack={goBack} onUpdateSettings={(newSettings) => setSettings(newSettings)} />}
+            {page === 'verbalManagement' && <VerbalManagementView data={data} onBack={goBack} onAddTest={addTest} onAddQuestionsToTest={addQuestionsToTest} onDeleteTest={deleteTest} />}
+            
+            {page === 'quantitativeManagement' && (
+                <QuantitativeManagementView 
+                    onBack={goBack} 
+                    onStartTest={(test, returnTo) => handleStartTest(test, undefined, undefined, returnTo || 'quantitativeManagement')}
+                    data={data}
+                    onAddTest={addTest}
+                    onAddQuestionsToTest={addQuestionsToTest}
+                    onDeleteTest={deleteTest}
+                    // Pass processor control
+                    processorQueue={processor.queue}
+                    isProcessorWorking={processor.isProcessing}
+                    onAddFilesToQueue={processor.addFilesToQueue}
+                    onClearCompleted={processor.clearCompleted}
+                />
+            )}
+        </>
     );
 };
 

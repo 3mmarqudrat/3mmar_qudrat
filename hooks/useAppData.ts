@@ -2,8 +2,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { AppData, Test, Section, Question, TestAttempt, Folder, VerbalTests, VERBAL_BANKS, VERBAL_CATEGORIES, FolderQuestion } from '../types';
 import { authService } from '../services/authService';
+import { storageService } from '../services/storageService';
 
 const DEV_TESTS_USER_ID = 'developer-tests-data';
+const STORAGE_KEY = 'qudratUsersData';
 
 const initialVerbalTests: VerbalTests = Object.keys(VERBAL_BANKS).reduce((acc, bankKey) => {
   acc[bankKey] = Object.keys(VERBAL_CATEGORIES).reduce((catAcc, catKey) => {
@@ -22,8 +24,6 @@ const sampleTest: Test = {
     ]
 };
 
-
-// Fix: Export `getInitialData` so it can be used in other modules.
 export const getInitialData = (): AppData => ({
   tests: {
     quantitative: [],
@@ -47,55 +47,76 @@ export const getInitialData = (): AppData => ({
   reviewedQuestionIds: {},
 });
 
-const loadAllUsersData = (): { [key: string]: AppData } => {
-    try {
-        const item = window.localStorage.getItem('qudratUsersData');
-        const data = item ? JSON.parse(item) : {};
-        // Ensure dev tests container exists
-        if (!data[DEV_TESTS_USER_ID]) {
-            data[DEV_TESTS_USER_ID] = getInitialData();
-        }
-        return data;
-    } catch (error) {
-        console.error("Failed to load user data from localStorage", error);
-        return {};
-    }
-};
-
-const saveAllUsersData = (allData: { [key: string]: AppData }) => {
-    try {
-        window.localStorage.setItem('qudratUsersData', JSON.stringify(allData));
-        // Dispatch a custom event to notify other hook instances (in the same window) to reload
-        window.dispatchEvent(new Event('qudratDataUpdated'));
-    } catch (error) {
-        console.error("Failed to save user data to localStorage", error);
-    }
-};
-
 export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewMode: boolean) => {
-  const [allUsersData, setAllUsersData] = useState(loadAllUsersData);
+  const [allUsersData, setAllUsersData] = useState<{ [key: string]: AppData }>({});
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Listen for updates from other instances of this hook (e.g. Management views updating data)
+  // Load data from IndexedDB (with migration from localStorage if needed)
   useEffect(() => {
-      const handleDataUpdate = () => {
-          setAllUsersData(loadAllUsersData());
-      };
-      
-      window.addEventListener('qudratDataUpdated', handleDataUpdate);
-      // Listen to storage event for cross-tab synchronization
-      window.addEventListener('storage', handleDataUpdate);
-      
-      return () => {
-          window.removeEventListener('qudratDataUpdated', handleDataUpdate);
-          window.removeEventListener('storage', handleDataUpdate);
-      };
+    const loadData = async () => {
+        setIsLoading(true);
+        try {
+            // 1. Try IndexedDB
+            let data = await storageService.getItem<{ [key: string]: AppData }>(STORAGE_KEY);
+            
+            // 2. Migration: If empty in IDB, check LocalStorage
+            if (!data || Object.keys(data).length === 0) {
+                const lsItem = window.localStorage.getItem(STORAGE_KEY);
+                if (lsItem) {
+                    try {
+                        console.log("Migrating data from LocalStorage to IndexedDB...");
+                        data = JSON.parse(lsItem);
+                        // Save to IDB
+                        await storageService.setItem(STORAGE_KEY, data);
+                        // Clear LocalStorage to free up space/avoid quota errors
+                        window.localStorage.removeItem(STORAGE_KEY);
+                    } catch (e) {
+                        console.error("Migration failed:", e);
+                    }
+                }
+            }
+            
+            // 3. Ensure dev structure exists
+            if (!data) data = {};
+            if (!data[DEV_TESTS_USER_ID]) {
+                data[DEV_TESTS_USER_ID] = getInitialData();
+            }
+
+            setAllUsersData(data);
+        } catch (error) {
+            console.error("Failed to load user data", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    loadData();
+
+    const handleDataUpdate = () => {
+        // Reload from DB if another tab/component updated it
+        loadData();
+    };
+    
+    window.addEventListener('qudratDataUpdated', handleDataUpdate);
+    
+    return () => {
+        window.removeEventListener('qudratDataUpdated', handleDataUpdate);
+    };
   }, []);
+
+  const saveAllUsersData = async (newData: { [key: string]: AppData }) => {
+      try {
+          await storageService.setItem(STORAGE_KEY, newData);
+          window.dispatchEvent(new Event('qudratDataUpdated'));
+      } catch (error) {
+          console.error("Failed to save user data to IndexedDB", error);
+      }
+  };
 
   const data: AppData = useMemo(() => {
     const activeUserId = userId;
     if (!activeUserId) return getInitialData();
     
-    // Ensure the user data exists and has all initial fields
     const userDataFromStorage = allUsersData[activeUserId];
     const initialData = getInitialData();
     const userData = {
@@ -106,8 +127,6 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     };
     const devTestsData = allUsersData[DEV_TESTS_USER_ID] || getInitialData();
 
-    // Devs see dev tests. Regular users (or devs in preview) see dev tests too.
-    // Personal data (folders, history, reviewTests) comes from the active user's data slot.
     return {
       tests: devTestsData.tests,
       folders: userData.folders,
@@ -116,15 +135,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
       reviewedQuestionIds: userData.reviewedQuestionIds,
     };
   }, [userId, allUsersData]);
-  
-  useEffect(() => {
-    // Only save if the data actually changed compared to loaded data to avoid loops,
-    // but here we rely on the setters to trigger saves.
-    // We don't auto-save 'data' because it's a derived view.
-    // The modifiers below call saveAllUsersData.
-  }, []);
 
-  // Updater for the currently active user's data (history, folders)
   const updateCurrentUserData = (updater: (draft: AppData) => void) => {
     const activeUserId = userId;
     if (!activeUserId) return;
@@ -133,12 +144,12 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
       const userDraft = JSON.parse(JSON.stringify(newAll[activeUserId] || getInitialData()));
       updater(userDraft);
       newAll[activeUserId] = userDraft;
-      saveAllUsersData(newAll); // Save immediately
+      // Fire and forget save (optimistic UI update)
+      saveAllUsersData(newAll);
       return newAll;
     });
   };
 
-  // Updater for the central test bank data
   const updateDevTestsData = (updater: (draft: AppData) => void) => {
     if (!isDevUser) return;
     setAllUsersData(prevAll => {
@@ -146,7 +157,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
       const devDraft = JSON.parse(JSON.stringify(newAll[DEV_TESTS_USER_ID] || getInitialData()));
       updater(devDraft);
       newAll[DEV_TESTS_USER_ID] = devDraft;
-      saveAllUsersData(newAll); // Save immediately
+      saveAllUsersData(newAll);
       return newAll;
     });
   };
@@ -231,7 +242,6 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
             
             const reviewTestsInSection = draft.reviewTests[section];
 
-            // 1. Collect all existing original IDs in the review section to prevent duplicates
             const existingOriginalIds = new Set<string>();
             reviewTestsInSection.forEach(test => {
                 test.questions.forEach(q => {
@@ -240,7 +250,6 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
                 });
             });
 
-            // 2. Filter incoming questions
             const uniqueQuestionsToAdd = questions.filter(q => {
                 return q.originalId && !existingOriginalIds.has(q.originalId);
             });
@@ -265,7 +274,6 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
                     draft.reviewTests[section].push(targetTest);
                 }
                 targetTest.questions.push(questionToAdd);
-                // Mark original question ID as reviewed
                 draft.reviewedQuestionIds[questionToAdd.originalId || questionToAdd.id] = true;
             }
         });
@@ -284,10 +292,10 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
         const userAnswer = answeredQuestions.get(question.id);
         const isCorrect = userAnswer && userAnswer.trim() === question.correctAnswer.trim();
 
-        if (!isCorrect) { // This covers both incorrect and unanswered questions
+        if (!isCorrect) {
             questionsToReview.push({
                 ...question,
-                originalId: question.id, // Store the original ID for tracking
+                originalId: question.id,
                 userAnswer: userAnswer,
                 addedDate: new Date().toISOString(),
                 bankKey: attempt.bankKey,
@@ -376,5 +384,20 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
   
   const reviewedQuestionIdsSet = useMemo(() => new Set(Object.keys(data.reviewedQuestionIds || {})), [data.reviewedQuestionIds]);
 
-  return { data, addTest, addQuestionsToTest, deleteTest, addAttemptToHistory, createFolder, addQuestionToFolder, deleteFolder, addQuestionsToReview, deleteUserData, addDelayedQuestionToReview, addSpecialLawQuestionToReview, reviewedQuestionIds: reviewedQuestionIdsSet };
+  return { 
+    data, 
+    isLoading, // Export loading state
+    addTest, 
+    addQuestionsToTest, 
+    deleteTest, 
+    addAttemptToHistory, 
+    createFolder, 
+    addQuestionToFolder, 
+    deleteFolder, 
+    addQuestionsToReview, 
+    deleteUserData, 
+    addDelayedQuestionToReview, 
+    addSpecialLawQuestionToReview, 
+    reviewedQuestionIds: reviewedQuestionIdsSet 
+  };
 };

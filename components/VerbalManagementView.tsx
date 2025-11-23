@@ -1,71 +1,102 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { AppData, Question, Section, Test, VERBAL_BANKS, VERBAL_CATEGORIES } from '../types';
 import { ArrowRightIcon, CheckCircleIcon, FileTextIcon, InfoIcon, SaveIcon, TrashIcon, XCircleIcon } from './Icons';
 
+interface ParsedQuestion extends Omit<Question, 'id' | 'correctAnswer'> {
+    passage?: string; // New field to hold the extracted passage text
+}
+
 /**
- * Parses a string of text to extract questions and their options based on a specific format.
- * A line is a question if the next non-empty/non-comment line is a separator.
- * Lines following a separator are options until the next question is found.
- * @param text The raw text to parse.
- * @returns An array of question objects, with an empty correctAnswer.
+ * Advanced parser that handles Reading Comprehension passages.
+ * Logic:
+ * 1. Find all "Separators" (points).
+ * 2. The line before a separator is the Question.
+ * 3. Lines after separator are Options.
+ * 4. Text between the end of previous options and start of current question is the Passage.
  */
-const parseQuestionsFromText = (text: string): Omit<Question, 'id' | 'correctAnswer'>[] => {
-    const questions: { questionText: string, options: string[] }[] = [];
+const parseQuestionsFromText = (text: string): ParsedQuestion[] => {
     if (!text.trim()) return [];
 
     const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('*'));
+    const questions: ParsedQuestion[] = [];
     
-    let currentQuestion: { questionText: string, options: string[] } | null = null;
+    // 1. Identify all "Question Blocks" based on the separator
+    const separatorIndices: number[] = [];
+    lines.forEach((line, index) => {
+        if (line === 'نقطة واحدة' || line === 'ليس هناك نقاط') {
+            separatorIndices.push(index);
+        }
+    });
 
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+    if (separatorIndices.length === 0) return [];
+
+    let lastBlockEndIndex = -1; // Tracks where the last processed line (options) ended
+    let currentPassage: string | undefined = undefined;
+
+    separatorIndices.forEach((sepIndex) => {
+        // Validation: Ensure there is a line before the separator (The Question)
+        if (sepIndex === 0) return;
+
+        const questionLineIndex = sepIndex - 1;
+        const questionText = lines[questionLineIndex];
+
+        // 2. Detect Passage (Text between last block end and current question)
+        // Everything between (lastBlockEndIndex) and (questionLineIndex) is potential passage text
+        const potentialPassageLines = lines.slice(lastBlockEndIndex + 1, questionLineIndex);
         
-        const isSeparator = line === 'نقطة واحدة' || line === 'ليس هناك نقاط';
+        if (potentialPassageLines.length > 0) {
+            // If there is text in the gap, it's a new passage
+            currentPassage = potentialPassageLines.join('\n');
+        } 
+        // If potentialPassageLines is empty, we keep the `currentPassage` from the previous iteration
+        // This handles multiple questions for the same text.
+
+        // 3. Extract Options
+        const options: string[] = [];
+        let currentOptionIndex = sepIndex + 1;
         
-        if (isSeparator) {
-            continue;
+        // Look ahead for options until we hit text that looks like a new question/passage or end of file
+        // Heuristic: Stop if we hit a separator, or if we collected 4 options and the next line doesn't look like an option (optional check)
+        // Stronger Logic: Stop at the next Question Line.
+        // Determining the boundary of options is tricky if explicit markers aren't there.
+        // We assume options continue until the start of the next Passage or Question.
+        
+        // Find the NEXT separator to define the upper bound
+        const nextSepIndex = separatorIndices.find(idx => idx > sepIndex);
+        const nextQuestionIndex = nextSepIndex ? nextSepIndex - 1 : lines.length;
+        
+        // Check for passage lines before the next question
+        // We need to scan from sepIndex + 1 until we hit something that IS NOT an option.
+        // But since we don't know what is an option vs passage, we rely on the `potentialPassageLines` logic of the NEXT iteration.
+        // ACTUALLY: The safest bet with the user's format is to assume standard 4 options, 
+        // OR simply take lines until we assume it's part of the next block.
+        
+        // Let's take up to 4 lines as options initially, or look for typical option patterns?
+        // User said: "Separator -> 4 choices -> Then text".
+        // So we can greedily take up to 4 lines as options.
+        
+        let maxOptions = 4;
+        while (currentOptionIndex < lines.length && 
+               currentOptionIndex < nextQuestionIndex && // Don't eat the next question
+               options.length < maxOptions) { // Usually 4 options, sometimes 1 or 2
+            
+            // Safety: If this line looks like the start of a new passage (very long?), maybe stop?
+            // But relying on "max 4" is usually safe for Qudrat.
+            options.push(lines[currentOptionIndex]);
+            currentOptionIndex++;
         }
+        
+        // Update the end index
+        lastBlockEndIndex = currentOptionIndex - 1;
 
-        // Find the next non-option line to see if it's a separator
-        let nextMeaningfulLineIndex = i + 1;
-        while(nextMeaningfulLineIndex < lines.length && (lines[nextMeaningfulLineIndex].startsWith('*') || lines[nextMeaningfulLineIndex].trim() === '')) {
-            nextMeaningfulLineIndex++;
-        }
-        const nextMeaningfulLine = lines[nextMeaningfulLineIndex];
-        const isQuestionLine = nextMeaningfulLine === 'نقطة واحدة' || nextMeaningfulLine === 'ليس هناك نقاط';
+        questions.push({
+            questionText,
+            options,
+            passage: currentPassage // Attach the current active passage
+        });
+    });
 
-
-        if (isQuestionLine) {
-            // This line is a question. If we were building a previous question, save it now.
-            if (currentQuestion) {
-                 if (currentQuestion.options.length === 0) {
-                     // The previous "question" was actually the last option of the one before it.
-                     const lastRealQuestion = questions[questions.length - 1];
-                     if(lastRealQuestion) lastRealQuestion.options.push(currentQuestion.questionText);
-                 } else {
-                    questions.push(currentQuestion);
-                 }
-            }
-            // Start a new question object
-            currentQuestion = { questionText: line, options: [] };
-        } else if (currentQuestion) {
-            // This line is an option for the current question
-            if (currentQuestion.options.length < 4) {
-                 currentQuestion.options.push(line);
-            }
-        }
-    }
-
-    // Add the very last question if it exists in the buffer
-    if (currentQuestion) {
-        if (currentQuestion.options.length === 0) {
-             const lastRealQuestion = questions[questions.length - 1];
-             if(lastRealQuestion) lastRealQuestion.options.push(currentQuestion.questionText);
-        } else {
-            questions.push(currentQuestion);
-        }
-    }
-    
     return questions;
 };
 
@@ -109,7 +140,7 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [feedback, setFeedback] = useState<{type: 'success' | 'error', message: string} | null>(null);
     
-    const [parsedQuestions, setParsedQuestions] = useState<Omit<Question, 'id' | 'correctAnswer'>[]>([]);
+    const [parsedQuestions, setParsedQuestions] = useState<ParsedQuestion[]>([]);
     const [correctAnswers, setCorrectAnswers] = useState<Record<number, string>>({});
 
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<TestToDelete | null>(null);
@@ -169,10 +200,29 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
         }
 
         try {
-            const finalQuestions: Omit<Question, 'id'>[] = parsedQuestions.map((q, index) => ({
-                ...q,
-                correctAnswer: correctAnswers[index],
-            }));
+            // Prepare questions for saving
+            // IMPORTANT: If a passage exists, we prepend it to the question text so it appears in the exam.
+            const finalQuestions: Omit<Question, 'id'>[] = parsedQuestions.map((q, index) => {
+                let finalQuestionText = q.questionText;
+                
+                // If there is a passage, we modify the question text to include it visually.
+                // We add a delimiter or markdown-like style to separate them.
+                if (q.passage) {
+                    // Check if the previous question had the SAME passage. 
+                    // If so, maybe we don't need to repeat it? 
+                    // BUT for the "TakeTestView", every question is isolated in focus mode usually, 
+                    // so it's safer to attach the passage to every question that belongs to it.
+                    // To make it look good, we can add a visual separator.
+                    finalQuestionText = `**النص:**\n${q.passage}\n\n**السؤال:**\n${q.questionText}`;
+                }
+
+                return {
+                    questionText: finalQuestionText,
+                    options: q.options,
+                    correctAnswer: correctAnswers[index],
+                    // We can also store the raw passage in sourceText of the test, but here we bake it into the question
+                };
+            });
 
             const testId = onAddTest('verbal', `اختبار ${formState.testNumber.trim()}`, formState.selectedBank, formState.selectedCategory, formState.questionsText);
             onAddQuestionsToTest('verbal', testId, finalQuestions, formState.selectedBank, formState.selectedCategory);
@@ -225,7 +275,7 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
             
             <div className="flex-grow container mx-auto flex flex-row overflow-hidden">
                 {/* Sidebar */}
-                <aside className="w-1/4 p-4 border-l border-border overflow-y-auto">
+                <aside className="w-1/4 p-4 border-l border-border overflow-y-auto hidden md:block">
                     <nav className="space-y-1">
                         {Object.entries(VERBAL_BANKS).map(([bankKey, bankName]) => (
                             <div key={bankKey}>
@@ -251,13 +301,13 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
                 </aside>
 
                 {/* Main Content */}
-                <main className="w-3/4 p-4 md:p-6 overflow-y-auto space-y-8">
+                <main className="w-full md:w-3/4 p-4 md:p-6 overflow-y-auto space-y-8">
                     {/* Add Test Form */}
                     <div className="bg-surface p-6 rounded-lg border border-border">
                         <h2 className="text-2xl font-bold mb-4">إضافة اختبار جديد</h2>
-                        <div className="flex gap-4">
+                        <div className="flex flex-col lg:flex-row gap-4">
                             {/* Form Inputs & Text Area */}
-                            <div className="w-1/2 space-y-4">
+                            <div className="w-full lg:w-1/2 space-y-4">
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <select value={formState.selectedBank} onChange={e => updateFormState({ selectedBank: e.target.value })} className="w-full p-3 border rounded-md bg-zinc-700 text-slate-200 focus:ring-1 focus:border-primary focus-ring border-border">
                                         {Object.entries(VERBAL_BANKS).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
@@ -276,7 +326,7 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
                                 />
                                 <div className="flex items-start gap-2 p-3 bg-sky-900/50 border border-sky-700 text-sky-300 rounded-md text-sm">
                                     <InfoIcon className="w-6 h-6 flex-shrink-0 mt-1" />
-                                    <span><strong>تنسيق النص:</strong> السطر الذي يسبق "نقطة واحدة" هو السؤال. الأسطر التالية هي الخيارات. تجاهل أي سطر يبدأ بـ `*`.</span>
+                                    <span><strong>النظام الذكي:</strong> سيتم اكتشاف "استيعاب المقروء" تلقائياً. أي نص يظهر قبل السؤال (الذي يسبق كلمة "نقطة واحدة") سيتم اعتباره فقرة القراءة التابعة للسؤال.</span>
                                 </div>
                                 {feedback && (
                                     <div className={`p-3 rounded-md border flex items-center gap-2 text-sm font-bold ${feedback.type === 'success' ? 'bg-green-900/50 border-green-700 text-green-300' : 'bg-red-900/50 border-red-700 text-red-300'}`}>
@@ -286,14 +336,23 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
                                 )}
                             </div>
                             {/* Questions Preview */}
-                            <div className="w-1/2">
+                            <div className="w-full lg:w-1/2">
                                 {parsedQuestions.length > 0 ? (
-                                    <div className="bg-zinc-900/50 p-4 rounded-lg border border-border h-full flex flex-col">
+                                    <div className="bg-zinc-900/50 p-4 rounded-lg border border-border h-full flex flex-col max-h-[800px]">
                                         <h3 className="text-lg font-bold mb-2">معاينة ({parsedQuestions.length} سؤال)</h3>
-                                        <div className="flex-grow space-y-4 overflow-y-auto pr-2">
+                                        <div className="flex-grow space-y-4 overflow-y-auto pr-2 custom-scrollbar">
                                             {parsedQuestions.map((q, qIndex) => (
                                                 <div key={qIndex} className="p-3 bg-zinc-800 rounded-md border border-zinc-700">
-                                                    <p className="font-bold text-md text-gold mb-2">{qIndex + 1}. {q.questionText}</p>
+                                                    {q.passage && (
+                                                        <div className="mb-3 p-3 bg-zinc-900/80 rounded border-r-4 border-accent text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">
+                                                            <strong className="text-accent block mb-1">النص:</strong>
+                                                            {q.passage}
+                                                        </div>
+                                                    )}
+                                                    <p className="font-bold text-md text-gold mb-2">
+                                                        <span className="text-text-muted text-xs ml-1">{qIndex + 1}.</span> 
+                                                        {q.questionText}
+                                                    </p>
                                                     <div className="space-y-1">
                                                         {q.options.map((option, oIndex) => (
                                                             <label key={oIndex} className={`flex items-center gap-3 p-2 rounded-md hover:bg-zinc-700 cursor-pointer border-2 transition-all ${correctAnswers[qIndex] === option ? 'bg-accent/20 border-accent' : 'border-transparent'}`}>
@@ -313,7 +372,7 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="flex items-center justify-center h-full bg-zinc-900/50 rounded-lg text-text-muted text-center p-4 border border-border">
+                                    <div className="flex items-center justify-center h-full bg-zinc-900/50 rounded-lg text-text-muted text-center p-4 border border-border min-h-[300px]">
                                         <p>ستظهر معاينة الأسئلة هنا بعد لصق النص.</p>
                                     </div>
                                 )}

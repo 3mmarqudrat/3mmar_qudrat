@@ -1,12 +1,34 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Test, UserAnswer, TestAttempt, Question, FolderQuestion, VERBAL_BANKS, VERBAL_CATEGORIES } from '../types';
-import { ArrowRightIcon, ClockIcon, CheckCircleIcon, XCircleIcon, BookmarkIcon, ChevronDownIcon, InfoIcon, FileTextIcon, EyeIcon, ZoomInIcon, StarIcon, LogOutIcon } from './Icons';
+import { ArrowRightIcon, ClockIcon, CheckCircleIcon, XCircleIcon, BookmarkIcon, ChevronDownIcon, InfoIcon, FileTextIcon, EyeIcon, ZoomInIcon, StarIcon, LogOutIcon, BookOpenIcon } from './Icons';
+
+const toArabic = (n: number | string) => ('' + n).replace(/[0-9]/g, d => '٠١٢٣٤٥٦٧٨٩'[parseInt(d)]);
 
 const formatTime = (totalSeconds: number) => {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    return `${toArabic(String(minutes).padStart(2, '0'))}:${toArabic(String(seconds).padStart(2, '0'))}`;
+};
+
+// Helper to separate passage from question text
+const extractPassageAndQuestion = (fullText: string) => {
+    const passageMarker = "**النص:**";
+    const questionMarker = "**السؤال:**";
+    
+    // Check if the formatted markers exist
+    if (fullText.includes(passageMarker) && fullText.includes(questionMarker)) {
+        const parts = fullText.split(questionMarker);
+        // Clean up the passage part
+        const passagePart = parts[0].replace(passageMarker, '').trim();
+        // Clean up the question part
+        const questionPart = parts[1].trim();
+        
+        return { passage: passagePart, cleanQuestion: questionPart };
+    }
+    
+    // Fallback/Standard question
+    return { passage: null, cleanQuestion: fullText };
 };
 
 const QuestionAccordion: React.FC<{
@@ -59,6 +81,10 @@ const QuestionAccordion: React.FC<{
     const sourceSectionName = folderQuestion.sourceSection;
     const reviewType = folderQuestion.reviewType;
 
+    const gridClass = isQuantitative 
+        ? 'grid-cols-4' // Quantitative: Always 4 in a row
+        : 'grid-cols-1 sm:grid-cols-2'; // Verbal: 2 columns on desktop
+
     return (
         <div className="bg-surface rounded-lg border border-border overflow-hidden">
             <div 
@@ -90,7 +116,7 @@ const QuestionAccordion: React.FC<{
                             <div className="flex flex-col gap-1 w-full">
                                 <div className="flex justify-between items-start w-full">
                                      <span className="break-words w-full">
-                                        <span className="text-text-muted select-none">{qNumber}. </span>
+                                        <span className="text-text-muted select-none">{toArabic(qNumber)}. </span>
                                         {question.questionText}
                                     </span>
                                 </div>
@@ -152,15 +178,15 @@ const QuestionAccordion: React.FC<{
             >
                  <div className="overflow-hidden">
                     <div className="p-4 border-t border-border bg-black/10">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className={`grid gap-4 ${gridClass}`}>
                             {question.options.map((option, index) => (
                                 <button 
                                     key={index} 
                                     onClick={() => onSelectAnswer(option)} 
                                     disabled={isReviewMode}
-                                    className={`w-full text-right p-4 rounded-lg border text-lg font-medium transition-all duration-200 flex items-center gap-4 ${getOptionClass(option)} ${!isReviewMode && 'disabled:opacity-50'}`}
+                                    className={`w-full text-center p-4 rounded-lg border text-lg font-bold transition-all duration-200 flex items-center justify-center gap-2 ${getOptionClass(option)} ${!isReviewMode && 'disabled:opacity-50'}`}
                                 >
-                                    {isReviewMode && (
+                                    {isReviewMode && !isQuantitative && (
                                         <span className="inline-block flex-shrink-0">
                                             {option === question.correctAnswer && <CheckCircleIcon className="w-6 h-6 text-white"/>}
                                             {option === userAnswer && option !== question.correctAnswer && <XCircleIcon className="w-6 h-6 text-white"/>}
@@ -222,6 +248,18 @@ export const TakeTestView: React.FC<TakeTestViewProps> = ({ test, onFinishTest, 
     const isQuantitative = useMemo(() => {
         return test.questions.length > 0 && !!test.questions[0].questionImage;
     }, [test]);
+
+    // Compute unique passages to number them sequentially
+    const uniquePassages = useMemo(() => {
+        const passages: string[] = [];
+        test.questions.forEach(q => {
+             const { passage } = extractPassageAndQuestion(q.questionText);
+             if (passage && !passages.includes(passage)) {
+                 passages.push(passage);
+             }
+        });
+        return passages;
+    }, [test.questions]);
 
     const commitSessionFlagsToReview = useCallback(() => {
         // Commit bookmarks/delay
@@ -308,7 +346,8 @@ export const TakeTestView: React.FC<TakeTestViewProps> = ({ test, onFinishTest, 
     
     const handleConfirmExit = () => {
         if (onBack) {
-            commitSessionFlagsToReview();
+            // NOTE: User requested that exiting via back button considers they "didn't enter".
+            // So we do NOT commit session flags to review here. We just abort.
             onBack();
         }
     };
@@ -372,58 +411,58 @@ export const TakeTestView: React.FC<TakeTestViewProps> = ({ test, onFinishTest, 
             setShowExitConfirm(true);
         }
     };
+    
+    // Helper var for grouping
+    let lastRenderedPassage: string | null = null;
 
     return (
         <div className="bg-bg min-h-screen flex flex-col">
              <header className="bg-surface/80 backdrop-blur-lg p-4 sticky top-0 z-20 border-b border-border shadow-md">
-                {/* Header Grid:
-                    RTL Layout:
-                    Column 1 (Right): Back Button + Title (Switched as requested)
-                    Column 2 (Center): Filters
-                    Column 3 (Left): Timer
-                */}
-                <div className="container mx-auto grid grid-cols-2 md:grid-cols-12 items-center gap-4">
-                    
-                    {/* 1. Back Button & Title (Right Side) */}
-                    <div className="col-span-2 md:col-span-3 flex justify-start items-center gap-3 order-1">
-                         <button onClick={handleBackNavigation} className="p-2 rounded-full bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition-colors">
-                           <ArrowRightIcon className="w-5 h-5 text-text-muted"/>
-                        </button>
-                        <h1 className="text-lg md:text-xl font-bold text-text truncate max-w-full text-right" title={test.name}>{isReviewMode ? `مراجعة: ${test.name}` : test.name}</h1>
+                <div className="container mx-auto flex flex-col gap-4 md:block">
+                    {/* Header Layout: Right (Back+Title), Left (Timer), Center (Filters) - RTL */}
+                    <div className="flex items-center justify-between w-full">
+                        
+                        {/* 1. Back Button & Title (Right Side) */}
+                        <div className="flex justify-start items-center gap-3">
+                             <button onClick={handleBackNavigation} className="p-2 rounded-full bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition-colors">
+                               <ArrowRightIcon className="w-5 h-5 text-text-muted"/>
+                            </button>
+                            <h1 className="text-lg md:text-xl font-bold text-text truncate max-w-[200px] md:max-w-md text-right" title={test.name}>{isReviewMode ? `مراجعة: ${test.name}` : test.name}</h1>
+                        </div>
+
+                        {/* 3. Timer (Left Side) */}
+                         <div className="flex items-center justify-end gap-3">
+                            { !isReviewMode && (
+                                 <div className="font-mono text-xl text-cyan-400 bg-black/40 px-3 py-1.5 rounded-lg border border-cyan-500/30 shadow-[0_0_15px_-3px_rgba(6,182,212,0.3)] flex items-center gap-2">
+                                   <ClockIcon className="w-5 h-5"/> <span>{formatTime(elapsedTime)}</span>
+                                </div>
+                            )}
+                         </div>
                     </div>
 
-                    {/* 2. Filters (Center) - Spans full width on mobile if needed */}
-                    <div className="col-span-2 md:col-span-6 flex justify-center order-3 md:order-2 w-full">
-                        {isReviewMode && (
+                    {/* 2. Filters (Center) - Below on mobile, center on desktop if needed, but for now stack works better or separate line */}
+                    {isReviewMode && (
+                        <div className="flex justify-center w-full mt-2 md:mt-0">
                              <div className="flex flex-wrap justify-center items-center gap-2 bg-black/40 p-1.5 rounded-lg border border-zinc-700/50 backdrop-blur-sm w-full md:w-auto shadow-inner">
                                 <button onClick={() => setReviewFilter('all')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center justify-center gap-2 ${reviewFilter === 'all' ? 'bg-zinc-100 text-black shadow-lg' : 'text-zinc-300 hover:bg-white/10'}`}>
                                     <span>الكل</span>
-                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'all' ? 'bg-black/20 text-black' : 'bg-black/40 text-white'}`}>{reviewSummary.all}</span>
+                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'all' ? 'bg-black/20 text-black' : 'bg-black/40 text-white'}`}>{toArabic(reviewSummary.all)}</span>
                                 </button>
                                 <button onClick={() => setReviewFilter('correct')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center justify-center gap-2 ${reviewFilter === 'correct' ? 'bg-green-500 text-white shadow-lg' : 'text-zinc-300 hover:bg-white/10'}`}>
                                     <span>الصحيحة</span>
-                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'correct' ? 'bg-black/20' : 'bg-black/40'}`}>{reviewSummary.correct}</span>
+                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'correct' ? 'bg-black/20' : 'bg-black/40'}`}>{toArabic(reviewSummary.correct)}</span>
                                 </button>
                                 <button onClick={() => setReviewFilter('incorrect')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center justify-center gap-2 ${reviewFilter === 'incorrect' ? 'bg-red-500 text-white shadow-lg' : 'text-zinc-300 hover:bg-white/10'}`}>
                                     <span>الخاطئة</span>
-                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'incorrect' ? 'bg-black/20' : 'bg-black/40'}`}>{reviewSummary.incorrect}</span>
+                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'incorrect' ? 'bg-black/20' : 'bg-black/40'}`}>{toArabic(reviewSummary.incorrect)}</span>
                                 </button>
                                 <button onClick={() => setReviewFilter('unanswered')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center justify-center gap-2 ${reviewFilter === 'unanswered' ? 'bg-yellow-500 text-white shadow-lg' : 'text-zinc-300 hover:bg-white/10'}`}>
                                     <span>المتروكة</span>
-                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'unanswered' ? 'bg-black/20' : 'bg-black/40'}`}>{reviewSummary.unanswered}</span>
+                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'unanswered' ? 'bg-black/20' : 'bg-black/40'}`}>{toArabic(reviewSummary.unanswered)}</span>
                                 </button>
                             </div>
-                        )}
-                    </div>
-                    
-                     {/* 3. Timer (Left Side) */}
-                     <div className="col-span-1 md:col-span-3 flex items-center justify-end gap-3 order-2 md:order-3">
-                        { !isReviewMode && (
-                             <div className="font-mono text-xl text-cyan-400 bg-black/40 px-3 py-1.5 rounded-lg border border-cyan-500/30 shadow-[0_0_15px_-3px_rgba(6,182,212,0.3)] flex items-center gap-2">
-                               <ClockIcon className="w-5 h-5"/> <span>{formatTime(elapsedTime)}</span>
-                            </div>
-                        )}
-                     </div>
+                        </div>
+                    )}
                 </div>
             </header>
             
@@ -431,24 +470,51 @@ export const TakeTestView: React.FC<TakeTestViewProps> = ({ test, onFinishTest, 
                <div className="space-y-4">
                  {filteredQuestions.map((q, index) => {
                     const originalIndex = test.questions.findIndex(origQ => origQ.id === q.id);
+                    
+                    // Parse logic to extract Passage
+                    const { passage, cleanQuestion } = extractPassageAndQuestion(q.questionText);
+                    
+                    let showPassage = false;
+                    let passageNumber = 0;
+                    
+                    // If we have a passage, and it's distinct from the previously rendered one in this list, show it.
+                    if (passage && passage !== lastRenderedPassage) {
+                        showPassage = true;
+                        lastRenderedPassage = passage;
+                        // Calculate absolute passage number in the test
+                        passageNumber = uniquePassages.indexOf(passage) + 1;
+                    }
+                    
                     return (
-                        <QuestionAccordion 
-                            key={q.id}
-                            question={q}
-                            qNumber={originalIndex + 1}
-                            isReviewMode={isReviewMode}
-                            userAnswer={userAnswers.find(a => a.questionId === q.id)?.answer}
-                            onSelectAnswer={(answer) => handleSelectAnswer(q.id, answer)}
-                            isFlagged={reviewedQuestionIds.has(q.id) || sessionFlaggedIds.has(q.id)}
-                            onToggleFlag={() => handleToggleFlag(q.id)}
-                            isSpecialLaw={reviewedQuestionIds.has(q.id) || sessionSpecialLawIds.has(q.id)}
-                            onToggleSpecialLaw={() => handleToggleSpecialLaw(q.id)}
-                            isFlagButtonDisabled={reviewedQuestionIds.has(q.id)}
-                            onShowInfo={() => setInfoModalQuestion(q as FolderQuestion)}
-                            isReviewTest={isReviewTest}
-                            isQuantitative={isQuantitative}
-                            onZoomImage={(src) => setFullScreenImage(src)}
-                        />
+                        <div key={q.id}>
+                            {showPassage && (
+                                <div className="mb-4 mt-6 p-5 bg-zinc-800/80 rounded-lg border-r-4 border-primary shadow-md">
+                                    <h3 className="text-primary font-bold mb-3 flex items-center gap-2 text-lg border-b border-zinc-700 pb-2">
+                                        <BookOpenIcon className="w-5 h-5"/>
+                                        قطعة {toArabic(passageNumber)}
+                                    </h3>
+                                    <div className="text-lg leading-loose text-slate-200 whitespace-pre-wrap pl-2 font-medium">
+                                        {passage}
+                                    </div>
+                                </div>
+                            )}
+                            <QuestionAccordion 
+                                question={{...q, questionText: cleanQuestion}}
+                                qNumber={originalIndex + 1}
+                                isReviewMode={isReviewMode}
+                                userAnswer={userAnswers.find(a => a.questionId === q.id)?.answer}
+                                onSelectAnswer={(answer) => handleSelectAnswer(q.id, answer)}
+                                isFlagged={reviewedQuestionIds.has(q.id) || sessionFlaggedIds.has(q.id)}
+                                onToggleFlag={() => handleToggleFlag(q.id)}
+                                isSpecialLaw={reviewedQuestionIds.has(q.id) || sessionSpecialLawIds.has(q.id)}
+                                onToggleSpecialLaw={() => handleToggleSpecialLaw(q.id)}
+                                isFlagButtonDisabled={reviewedQuestionIds.has(q.id)}
+                                onShowInfo={() => setInfoModalQuestion(q as FolderQuestion)}
+                                isReviewTest={isReviewTest}
+                                isQuantitative={isQuantitative}
+                                onZoomImage={(src) => setFullScreenImage(src)}
+                            />
+                        </div>
                     );
                  })}
                </div>
@@ -496,7 +562,7 @@ export const TakeTestView: React.FC<TakeTestViewProps> = ({ test, onFinishTest, 
                             <p><strong className="text-text-muted">البنك:</strong> {infoModalQuestion.sourceBank || 'غير محدد'}</p>
                             <p><strong className="text-text-muted">القسم:</strong> {infoModalQuestion.sourceSection || 'غير محدد'}</p>
                             <p><strong className="text-text-muted">الاختبار الأصلي:</strong> {infoModalQuestion.sourceTest || 'غير محدد'}</p>
-                            <p><strong className="text-text-muted">رقم السؤال الأصلي:</strong> {infoModalQuestion.originalQuestionIndex !== undefined ? infoModalQuestion.originalQuestionIndex + 1 : 'غير محدد'}</p>
+                            <p><strong className="text-text-muted">رقم السؤال الأصلي:</strong> {infoModalQuestion.originalQuestionIndex !== undefined ? toArabic(infoModalQuestion.originalQuestionIndex + 1) : 'غير محدد'}</p>
                             <p><strong className="text-text-muted">تاريخ الإضافة للمراجعة:</strong> {infoModalQuestion.addedDate ? new Date(infoModalQuestion.addedDate).toLocaleString('ar-SA') : 'غير محدد'}</p>
                         </div>
                          <button onClick={() => setInfoModalQuestion(null)} className="mt-6 w-full px-4 py-2 bg-zinc-600 rounded-md hover:bg-zinc-500 transition-colors font-semibold">إغلاق</button>
@@ -516,7 +582,7 @@ export const TakeTestView: React.FC<TakeTestViewProps> = ({ test, onFinishTest, 
                 <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 backdrop-blur-sm">
                     <div className="bg-surface rounded-lg p-8 m-4 max-w-sm w-full text-center shadow-2xl border border-border">
                         <h2 className="text-xl font-bold mb-4">تأكيد الخروج</h2>
-                        <p className="text-text-muted mb-6">هل أنت متأكد من رغبتك في الخروج؟ سيتم حفظ أي أسئلة قمت بتحديدها للمراجعة.</p>
+                        <p className="text-text-muted mb-6">هل أنت متأكد من رغبتك في الخروج؟ لن يتم حفظ هذه المحاولة.</p>
                         <div className="flex justify-center gap-4">
                             <button onClick={() => setShowExitConfirm(false)} className="px-6 py-2 bg-zinc-600 text-slate-200 rounded-md hover:bg-zinc-500 transition-colors font-semibold">إلغاء</button>
                             <button onClick={handleConfirmExit} className="px-6 py-2 text-white rounded-md bg-red-600 hover:bg-red-700 transition-colors font-semibold">خروج</button>

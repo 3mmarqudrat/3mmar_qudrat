@@ -1,5 +1,4 @@
 
-
 export type Section = 'quantitative' | 'verbal';
 
 export interface LoginRecord {
@@ -120,10 +119,10 @@ export type ReviewDateFilter = 'today' | 'week' | 'month' | 'byDay' | 'byMonth' 
 export type ReviewAttributeFilterType = 'all' | 'mistake' | 'delay' | 'specialLaw';
 
 export interface ReviewAttributeFilters {
-  bank: string;
-  category: string;
-  type: ReviewAttributeFilterType;
-  selectedTestIds?: string[]; // For Quantitative test selection
+  bank: string[];      // Changed to array
+  category: string[];  // Changed to array
+  type: ReviewAttributeFilterType[]; // Changed to array
+  selectedTestIds: string[]; 
 }
 
 export type ReviewActiveFilterPanel = 'time' | 'attribute' | null;

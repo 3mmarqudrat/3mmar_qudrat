@@ -10,10 +10,10 @@ export interface AppSettings {
 const SETTINGS_KEY = 'qudratAppSettings';
 
 const defaultSettings: AppSettings = {
-    isQuantitativeEnabled: false,
+    isQuantitativeEnabled: true,
     isVerbalEnabled: true,
-    isReviewQuantitativeEnabled: true, // Default enabled
-    isReviewVerbalEnabled: true,      // Default enabled
+    isReviewQuantitativeEnabled: true,
+    isReviewVerbalEnabled: true,
 };
 
 export const settingsService = {

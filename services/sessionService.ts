@@ -1,8 +1,9 @@
-// Fix: Remove non-existent 'TestContext' from import.
-import { UserAnswer, Section, Test, TestAttempt, Folder, ReviewFilterState } from '../types';
 
-// This defines the structure of the state that gets saved to localStorage.
-// It's a subset of the main AppState to avoid saving transient UI states like modal visibility.
+// Fix: Remove non-existent 'TestContext' from import.
+import { UserAnswer, Section, Test, Folder, ReviewFilterState } from '../types';
+import { storageService } from './storageService';
+
+// This defines the structure of the state that gets saved.
 export interface SessionState {
   pageHistory?: string[];
   userMode?: 'training' | 'review' | null;
@@ -21,50 +22,45 @@ export interface SessionState {
 const getSessionKey = (userKey: string) => `qudratSession_${userKey}`;
 
 export const sessionService = {
-    saveSessionState: (state: SessionState, userKey: string) => {
+    saveSessionState: async (state: SessionState, userKey: string) => {
         if (!userKey) return;
         try {
-            localStorage.setItem(getSessionKey(userKey), JSON.stringify(state));
+            await storageService.setItem(getSessionKey(userKey), state);
         } catch (error) {
             console.error("Failed to save session state:", error);
         }
     },
 
-    loadSessionState: (userKey: string): SessionState | null => {
+    loadSessionState: async (userKey: string): Promise<SessionState | null> => {
         if (!userKey) return null;
         try {
-            const savedStateJSON = localStorage.getItem(getSessionKey(userKey));
-            if (savedStateJSON) {
-                const loadedState = JSON.parse(savedStateJSON);
-                return loadedState;
-            }
-            return null;
+            return await storageService.getItem<SessionState>(getSessionKey(userKey));
         } catch (error) {
             console.error("Failed to load session state:", error);
             return null;
         }
     },
 
-    clearTestState: (userKey: string) => {
+    clearTestState: async (userKey: string) => {
         if (!userKey) return;
         try {
-            const session = sessionService.loadSessionState(userKey);
+            const session = await sessionService.loadSessionState(userKey);
             if (session) {
                 delete session.currentTest;
                 delete session.currentTestContext;
                 delete session.userAnswers;
                 delete session.elapsedTime;
-                sessionService.saveSessionState(session, userKey);
+                await sessionService.saveSessionState(session, userKey);
             }
         } catch (error) {
             console.error("Failed to clear test state:", error);
         }
     },
 
-    clearFullSessionState: (userKey: string) => {
+    clearFullSessionState: async (userKey: string) => {
         if (!userKey) return;
         try {
-            localStorage.removeItem(getSessionKey(userKey));
+            await storageService.removeItem(getSessionKey(userKey));
         } catch (error) {
             console.error("Failed to clear session state:", error);
         }
