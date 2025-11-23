@@ -1176,7 +1176,20 @@ const App: React.FC = () => {
         attributeFilters: { bank: ['all'], category: ['all'], type: ['all'], selectedTestIds: ['all'] },
     });
 
-    const { data, isLoading: isDataLoading, addTest, addQuestionsToTest, deleteTest, deleteTests, updateQuestionAnswer, addAttemptToHistory, deleteUserData, addDelayedQuestionToReview, addSpecialLawQuestionToReview, reviewedQuestionIds } = useAppData(activeUserKey, isDevUser, isPreviewMode);
+    const { 
+        data, 
+        isLoading: isDataLoading, 
+        addTest, 
+        addQuestionsToTest, 
+        deleteTest,
+        deleteTests, 
+        updateQuestionAnswer, 
+        addAttemptToHistory, 
+        deleteUserData, 
+        addDelayedQuestionToReview, 
+        addSpecialLawQuestionToReview, 
+        reviewedQuestionIds 
+    } = useAppData(activeUserKey, isDevUser, isPreviewMode);
     
     // --- INTEGRATE PROCESSOR HOOK HERE ---
     const processor = useQuantitativeProcessor(addTest, addQuestionsToTest);
@@ -1546,7 +1559,7 @@ const App: React.FC = () => {
                     onAddTest={addTest}
                     onAddQuestionsToTest={addQuestionsToTest}
                     onDeleteTest={deleteTest}
-                    onDeleteTests={deleteTests} // Pass new function
+                    onDeleteTests={deleteTests}
                     onUpdateQuestionAnswer={updateQuestionAnswer}
                     // Pass processor control
                     processorQueue={processor.queue}

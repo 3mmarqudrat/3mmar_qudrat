@@ -246,17 +246,16 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     });
   };
   
-  // New function for bulk deletion
   const deleteTests = (section: Section, testIds: string[], bankKey?: string, categoryKey?: string) => {
-    if (!isDevUser || testIds.length === 0) return;
+    if (!isDevUser) return;
     updateDevTestsData(draft => {
-        if (section === 'quantitative') {
-            draft.tests.quantitative = draft.tests.quantitative.filter(test => !testIds.includes(test.id));
-        } else if (section === 'verbal' && bankKey && categoryKey) {
-            if (draft.tests.verbal[bankKey] && draft.tests.verbal[bankKey][categoryKey]) {
-                draft.tests.verbal[bankKey][categoryKey] = draft.tests.verbal[bankKey][categoryKey].filter((t: Test) => !testIds.includes(t.id));
-             }
-        }
+      if (section === 'verbal' && bankKey && categoryKey) {
+         if (draft.tests.verbal[bankKey] && draft.tests.verbal[bankKey][categoryKey]) {
+            draft.tests.verbal[bankKey][categoryKey] = draft.tests.verbal[bankKey][categoryKey].filter((t: Test) => !testIds.includes(t.id));
+         }
+      } else if (section === 'quantitative') {
+        draft.tests.quantitative = draft.tests.quantitative.filter(test => !testIds.includes(test.id));
+      }
     });
   };
 
@@ -422,8 +421,8 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     isLoading, // Export loading state
     addTest, 
     addQuestionsToTest, 
-    deleteTest,
-    deleteTests, // Export bulk delete
+    deleteTest, 
+    deleteTests,
     updateQuestionAnswer,
     addAttemptToHistory, 
     createFolder, 
