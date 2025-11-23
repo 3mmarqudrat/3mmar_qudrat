@@ -4,8 +4,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { Question, Section } from '../types';
 
 // Configure PDF.js worker
-// Fixed: Use version 3.11.174 to match package.json and use .min.js
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+// Fixed: Use version 4.0.379 to match importmap
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
 
 // Declare Tesseract globally
 declare const Tesseract: any;
@@ -76,7 +76,7 @@ export const useQuantitativeProcessor = (
     const normalizeAnswer = (str: string): string | null => {
         if (!str) return null;
         const s = str.trim();
-        if (['أ', 'ا', 'A', 'a'].some(c => s.includes(c))) return 'أ';
+        if (['أ', 'ا', 'آ', 'إ', 'A', 'a'].some(c => s.includes(c))) return 'أ';
         if (['ب', 'B', 'b'].some(c => s.includes(c))) return 'ب';
         if (['ج', 'C', 'c', 'J'].some(c => s.includes(c))) return 'ج';
         if (['د', 'D', 'd'].some(c => s.includes(c))) return 'د';
@@ -103,18 +103,19 @@ export const useQuantitativeProcessor = (
             }
         }
 
+        // Updated regex to include all forms of Alif (أ ا آ إ)
         if (lastIndex !== -1) {
             const targetPart = clean.substring(lastIndex + matchedMarkerLength);
-            const match = targetPart.match(/([أبجدABCD])/i);
+            const match = targetPart.match(/([أاآإبجدABCD])/i);
             if (match) return normalizeAnswer(match[1]);
         }
         
         if (clean.length < 10) {
-             const match = clean.match(/([أبجدABCD])/i);
+             const match = clean.match(/([أاآإبجدABCD])/i);
              if (match) return normalizeAnswer(match[1]);
         }
         return null;
-    }
+    };
 
     const detectAnswerFromPdfText = async (page: any, cropBox: CropBox): Promise<string | null> => {
         try {
@@ -145,9 +146,10 @@ export const useQuantitativeProcessor = (
     const detectAnswerFromImage = async (imageSrc: string): Promise<string | null> => {
         try {
             const processedImage = await preprocessImage(imageSrc);
+            // Updated whitelist to include 'ا' (bare Alif) and 'آ' 'إ'
             const { data: { text } } = await Tesseract.recognize(
                 processedImage, 'ara', 
-                { logger: () => {}, tessedit_char_whitelist: 'أبجدABCD0oالإجابةالصحيحةالجواب:.-', tessedit_pageseg_mode: '6' }
+                { logger: () => {}, tessedit_char_whitelist: 'أاآإبجدABCD0oالإجابةالصحيحةالجواب:.-', tessedit_pageseg_mode: '6' }
             );
             return extractAnswerFromText(text);
         } catch (e) { return null; }
@@ -216,30 +218,21 @@ export const useQuantitativeProcessor = (
         setCurrentConfig(config);
     }, []);
 
-    const processQueue = useCallback(async () => {
-        if (processingRef.current || queue.filter(i => i.status === 'pending').length === 0 || !currentConfig) return;
+    const processNextItem = useCallback(async () => {
+        if (processingRef.current || !currentConfig) return;
+
+        // Find the first pending item - using the current queue state
+        const pendingItem = queue.find(i => i.status === 'pending');
+        if (!pendingItem) return;
 
         processingRef.current = true;
         setIsProcessing(true);
 
-        const pendingItemIndex = queue.findIndex(i => i.status === 'pending');
-        if (pendingItemIndex === -1) {
-            processingRef.current = false;
-            setIsProcessing(false);
-            return;
-        }
-
-        const activeItem = { ...queue[pendingItemIndex], status: 'processing' } as ProcessItem;
-        
         // Update status to processing
-        setQueue(prev => {
-            const next = [...prev];
-            next[pendingItemIndex] = activeItem;
-            return next;
-        });
+        setQueue(prev => prev.map(i => i.id === pendingItem.id ? { ...i, status: 'processing' } : i));
 
         try {
-            const file = activeItem.file;
+            const file = pendingItem.file;
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
             
@@ -251,8 +244,8 @@ export const useQuantitativeProcessor = (
             let processedCount = 0;
             const questionsToAdd: Omit<Question, 'id'>[] = [];
             
-            // Increased concurrency for speed for bulk uploads
-            const CONCURRENCY = 12; 
+            // Reduced CONCURRENCY to prevent freezing on large batches
+            const CONCURRENCY = 3; 
             
             for (let i = 0; i < pageIndices.length; i += CONCURRENCY) {
                 const chunk = pageIndices.slice(i, i + CONCURRENCY);
@@ -266,18 +259,15 @@ export const useQuantitativeProcessor = (
 
                 processedCount += chunk.length;
                 
-                // Update progress in state
-                setQueue(prev => {
-                    const next = [...prev];
-                    // Double check index in case queue changed (unlikely with synchronous access but safe)
-                    if (next[pendingItemIndex]) {
-                        next[pendingItemIndex] = {
-                            ...next[pendingItemIndex],
-                            progress: Math.round((processedCount / pageIndices.length) * 100)
-                        };
-                    }
-                    return next;
-                });
+                // Update progress safely
+                setQueue(prev => prev.map(item => 
+                    item.id === pendingItem.id 
+                    ? { ...item, progress: Math.round((processedCount / pageIndices.length) * 100) }
+                    : item
+                ));
+                
+                // Small breathing room for UI
+                await new Promise(r => setTimeout(r, 0));
             }
 
             if (questionsToAdd.length > 0) {
@@ -285,37 +275,32 @@ export const useQuantitativeProcessor = (
             }
 
             // Mark completed
-            setQueue(prev => {
-                const next = [...prev];
-                next[pendingItemIndex] = {
-                    ...next[pendingItemIndex],
-                    status: 'completed',
-                    progress: 100,
-                    totalQuestions: questionsToAdd.length
-                };
-                return next;
-            });
+            setQueue(prev => prev.map(item => 
+                item.id === pendingItem.id 
+                ? { ...item, status: 'completed', progress: 100, totalQuestions: questionsToAdd.length }
+                : item
+            ));
 
         } catch (error) {
             console.error("File processing error", error);
-            setQueue(prev => {
-                const next = [...prev];
-                next[pendingItemIndex] = { ...next[pendingItemIndex], status: 'error', progress: 0 };
-                return next;
-            });
+            setQueue(prev => prev.map(item => 
+                item.id === pendingItem.id 
+                ? { ...item, status: 'error', progress: 0 }
+                : item
+            ));
         } finally {
             processingRef.current = false;
-            // Trigger next loop
-            setTimeout(processQueue, 100);
+            // The useEffect below will trigger the next item automatically.
         }
     }, [queue, currentConfig, onAddTest, onAddQuestionsToTest]);
 
-    // Watch queue changes to trigger processing
+    // Watch queue changes. If processing is free and there are pending items, start the next one.
     useEffect(() => {
-        if (!processingRef.current && queue.some(i => i.status === 'pending')) {
-            processQueue();
+        const hasPending = queue.some(i => i.status === 'pending');
+        if (!processingRef.current && hasPending) {
+            processNextItem();
         }
-    }, [queue, processQueue]);
+    }, [queue, processNextItem]);
     
     // Check if fully done
     useEffect(() => {

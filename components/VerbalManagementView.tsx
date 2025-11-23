@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { AppData, Question, Section, Test, VERBAL_BANKS, VERBAL_CATEGORIES } from '../types';
-import { ArrowRightIcon, CheckCircleIcon, FileTextIcon, InfoIcon, SaveIcon, TrashIcon, XCircleIcon } from './Icons';
+import { ArrowRightIcon, CheckCircleIcon, FileTextIcon, InfoIcon, SaveIcon, TrashIcon, XCircleIcon, SettingsIcon } from './Icons';
 
 interface ParsedQuestion extends Omit<Question, 'id' | 'correctAnswer'> {
     passage?: string; // New field to hold the extracted passage text
@@ -9,11 +9,6 @@ interface ParsedQuestion extends Omit<Question, 'id' | 'correctAnswer'> {
 
 /**
  * Advanced parser that handles Reading Comprehension passages.
- * Logic:
- * 1. Find all "Separators" (points).
- * 2. The line before a separator is the Question.
- * 3. Lines after separator are Options.
- * 4. Text between the end of previous options and start of current question is the Passage.
  */
 const parseQuestionsFromText = (text: string): ParsedQuestion[] => {
     if (!text.trim()) return [];
@@ -42,58 +37,34 @@ const parseQuestionsFromText = (text: string): ParsedQuestion[] => {
         const questionText = lines[questionLineIndex];
 
         // 2. Detect Passage (Text between last block end and current question)
-        // Everything between (lastBlockEndIndex) and (questionLineIndex) is potential passage text
         const potentialPassageLines = lines.slice(lastBlockEndIndex + 1, questionLineIndex);
         
         if (potentialPassageLines.length > 0) {
-            // If there is text in the gap, it's a new passage
             currentPassage = potentialPassageLines.join('\n');
         } 
-        // If potentialPassageLines is empty, we keep the `currentPassage` from the previous iteration
-        // This handles multiple questions for the same text.
 
         // 3. Extract Options
         const options: string[] = [];
         let currentOptionIndex = sepIndex + 1;
         
-        // Look ahead for options until we hit text that looks like a new question/passage or end of file
-        // Heuristic: Stop if we hit a separator, or if we collected 4 options and the next line doesn't look like an option (optional check)
-        // Stronger Logic: Stop at the next Question Line.
-        // Determining the boundary of options is tricky if explicit markers aren't there.
-        // We assume options continue until the start of the next Passage or Question.
-        
-        // Find the NEXT separator to define the upper bound
         const nextSepIndex = separatorIndices.find(idx => idx > sepIndex);
         const nextQuestionIndex = nextSepIndex ? nextSepIndex - 1 : lines.length;
         
-        // Check for passage lines before the next question
-        // We need to scan from sepIndex + 1 until we hit something that IS NOT an option.
-        // But since we don't know what is an option vs passage, we rely on the `potentialPassageLines` logic of the NEXT iteration.
-        // ACTUALLY: The safest bet with the user's format is to assume standard 4 options, 
-        // OR simply take lines until we assume it's part of the next block.
-        
-        // Let's take up to 4 lines as options initially, or look for typical option patterns?
-        // User said: "Separator -> 4 choices -> Then text".
-        // So we can greedily take up to 4 lines as options.
-        
         let maxOptions = 4;
         while (currentOptionIndex < lines.length && 
-               currentOptionIndex < nextQuestionIndex && // Don't eat the next question
-               options.length < maxOptions) { // Usually 4 options, sometimes 1 or 2
+               currentOptionIndex < nextQuestionIndex && 
+               options.length < maxOptions) { 
             
-            // Safety: If this line looks like the start of a new passage (very long?), maybe stop?
-            // But relying on "max 4" is usually safe for Qudrat.
             options.push(lines[currentOptionIndex]);
             currentOptionIndex++;
         }
         
-        // Update the end index
         lastBlockEndIndex = currentOptionIndex - 1;
 
         questions.push({
             questionText,
             options,
-            passage: currentPassage // Attach the current active passage
+            passage: currentPassage 
         });
     });
 
@@ -107,6 +78,7 @@ interface VerbalManagementViewProps {
     onAddTest: (section: Section, testName: string, bankKey?: string, categoryKey?: string, sourceText?: string) => string;
     onAddQuestionsToTest: (section: Section, testId: string, questions: Omit<Question, 'id'>[], bankKey?: string, categoryKey?: string) => void;
     onDeleteTest: (section: Section, testId: string, bankKey?: string, categoryKey?: string) => void;
+    onUpdateQuestionAnswer: (section: Section, testId: string, questionId: string, newAnswer: string, bankKey?: string, categoryKey?: string) => void;
 }
 
 type TestToDelete = { test: Test; bankKey: string; catKey: string; };
@@ -132,7 +104,7 @@ const getInitialFormState = () => {
   }
 };
 
-export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data, onBack, onAddTest, onAddQuestionsToTest, onDeleteTest }) => {
+export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data, onBack, onAddTest, onAddQuestionsToTest, onDeleteTest, onUpdateQuestionAnswer }) => {
     const [activeBank, setActiveBank] = useState<string | null>(Object.keys(VERBAL_BANKS)[0]);
     const [activeCategory, setActiveCategory] = useState<string | null>(Object.keys(VERBAL_CATEGORIES)[0]);
     
@@ -146,6 +118,9 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<TestToDelete | null>(null);
     const [viewingSourceText, setViewingSourceText] = useState<string | null>(null);
     
+    // New state for editing an existing test
+    const [editingTest, setEditingTest] = useState<{ test: Test, bankKey: string, catKey: string } | null>(null);
+
     // Persist form state to localStorage
     useEffect(() => {
         localStorage.setItem(FORM_STATE_KEY, JSON.stringify(formState));
@@ -201,18 +176,9 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
 
         try {
             // Prepare questions for saving
-            // IMPORTANT: If a passage exists, we prepend it to the question text so it appears in the exam.
             const finalQuestions: Omit<Question, 'id'>[] = parsedQuestions.map((q, index) => {
                 let finalQuestionText = q.questionText;
-                
-                // If there is a passage, we modify the question text to include it visually.
-                // We add a delimiter or markdown-like style to separate them.
                 if (q.passage) {
-                    // Check if the previous question had the SAME passage. 
-                    // If so, maybe we don't need to repeat it? 
-                    // BUT for the "TakeTestView", every question is isolated in focus mode usually, 
-                    // so it's safer to attach the passage to every question that belongs to it.
-                    // To make it look good, we can add a visual separator.
                     finalQuestionText = `**النص:**\n${q.passage}\n\n**السؤال:**\n${q.questionText}`;
                 }
 
@@ -220,7 +186,6 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
                     questionText: finalQuestionText,
                     options: q.options,
                     correctAnswer: correctAnswers[index],
-                    // We can also store the raw passage in sourceText of the test, but here we bake it into the question
                 };
             });
 
@@ -397,6 +362,9 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
                                                         <FileTextIcon className="w-5 h-5" />
                                                     </button>
                                                 )}
+                                                <button onClick={() => setEditingTest({ test, bankKey: activeBank!, catKey: activeCategory! })} className="p-1 text-text-muted hover:text-accent transition-colors" title="تعديل الإجابات">
+                                                    <SettingsIcon className="w-5 h-5" />
+                                                </button>
                                                 <button onClick={() => setShowDeleteConfirm({ test, bankKey: activeBank!, catKey: activeCategory! })} className="p-1 text-text-muted hover:text-danger transition-colors" title={`حذف اختبار ${test.name}`}>
                                                     <TrashIcon className="w-5 h-5" />
                                                 </button>
@@ -413,6 +381,43 @@ export const VerbalManagementView: React.FC<VerbalManagementViewProps> = ({ data
             </div>
             
             {/* Modals */}
+             {editingTest && (
+                <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 backdrop-blur-sm" onClick={() => setEditingTest(null)}>
+                     <div className="bg-surface rounded-lg p-6 m-4 max-w-4xl w-full h-[80vh] flex flex-col border border-border" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-4 pb-2 border-b border-zinc-700">
+                             <h3 className="text-xl font-bold">تعديل الإجابات - {editingTest.test.name}</h3>
+                             <button onClick={() => setEditingTest(null)} className="p-2 hover:bg-zinc-700 rounded-full">
+                                 <XCircleIcon className="w-6 h-6 text-text-muted"/>
+                             </button>
+                        </div>
+                        <div className="flex-grow overflow-y-auto pr-2 custom-scrollbar space-y-3">
+                            {editingTest.test.questions.map((q, idx) => (
+                                <div key={q.id} className="bg-zinc-800 p-4 rounded-lg flex items-start justify-between gap-4">
+                                     <div className="flex-grow">
+                                         <p className="font-bold mb-2 text-sm md:text-base"><span className="text-accent">{idx + 1}.</span> {q.questionText}</p>
+                                         <div className="text-xs text-text-muted flex gap-2">
+                                             {q.options.map(opt => <span key={opt} className={`px-2 py-0.5 rounded border ${opt === q.correctAnswer ? 'border-green-500/50 bg-green-900/20' : 'border-zinc-700'}`}>{opt}</span>)}
+                                         </div>
+                                     </div>
+                                     <div className="flex-shrink-0 flex flex-col items-center">
+                                        <span className="text-xs text-text-muted mb-1">الإجابة الصحيحة</span>
+                                        <select
+                                            value={q.correctAnswer}
+                                            onChange={(e) => onUpdateQuestionAnswer('verbal', editingTest.test.id, q.id, e.target.value, editingTest.bankKey, editingTest.catKey)}
+                                            className="bg-zinc-700 border border-zinc-600 rounded px-3 py-1 text-sm font-bold focus:ring-accent focus:border-accent"
+                                        >
+                                            {q.options.map(opt => (
+                                                <option key={opt} value={opt}>{opt}</option>
+                                            ))}
+                                        </select>
+                                     </div>
+                                </div>
+                            ))}
+                        </div>
+                     </div>
+                </div>
+            )}
+
             {showDeleteConfirm && (
                 <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 backdrop-blur-sm">
                     <div className="bg-surface rounded-lg p-8 m-4 max-w-sm w-full text-center shadow-2xl border border-border">

@@ -5,8 +5,8 @@ import { Question, Test, AppData, Section } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure PDF.js worker
-// Fixed: Use version 3.11.174 to match package.json and use .min.js for better compatibility
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+// Fixed: Use version 4.0.379 to match importmap
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
 
 interface QuantitativeManagementViewProps {
     onBack: () => void;
@@ -15,7 +15,8 @@ interface QuantitativeManagementViewProps {
     onAddTest: (section: Section, testName: string, bankKey?: string, categoryKey?: string, sourceText?: string) => string;
     onAddQuestionsToTest: (section: Section, testId: string, questions: Omit<Question, 'id'>[], bankKey?: string, categoryKey?: string) => void;
     onDeleteTest: (section: Section, testId: string, bankKey?: string, categoryKey?: string) => void;
-    
+    onUpdateQuestionAnswer: (section: Section, testId: string, questionId: string, newAnswer: string, bankKey?: string, categoryKey?: string) => void;
+
     // New Props for Global Processing
     processorQueue: any[]; // Typing as any to avoid import circles, but ideally ProcessItem[]
     isProcessorWorking: boolean;
@@ -40,6 +41,7 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
     onStartTest, 
     data, 
     onDeleteTest,
+    onUpdateQuestionAnswer,
     processorQueue,
     isProcessorWorking,
     onAddFilesToQueue,
@@ -435,17 +437,28 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
                                             <h3 className="font-bold text-lg text-text-muted">سؤال {idx + 1}</h3>
                                             <div className="flex items-center gap-2">
                                                 <span className="text-sm text-text-muted">الإجابة الصحيحة:</span>
-                                                {q.correctAnswer === '?' ? (
-                                                     <span className="font-bold text-red-400 border border-red-500/50 px-2 rounded text-lg bg-red-900/20">غير واضحة</span>
-                                                ) : (
-                                                    <span className="font-bold text-success border border-success/50 px-2 rounded text-lg">{q.correctAnswer}</span>
-                                                )}
+                                                 {/* Answer Dropdown */}
+                                                <select
+                                                    value={q.correctAnswer}
+                                                    onChange={(e) => onUpdateQuestionAnswer('quantitative', selectedTest.id, q.id, e.target.value)}
+                                                    className={`px-3 py-1 rounded-md text-sm font-bold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface ${
+                                                        q.correctAnswer === '?' 
+                                                        ? 'bg-red-900/30 border-red-500 text-red-300 focus:ring-red-500' 
+                                                        : 'bg-green-900/30 border-green-500 text-green-300 focus:ring-green-500'
+                                                    }`}
+                                                >
+                                                    <option value="?">غير واضحة</option>
+                                                    <option value="أ">أ</option>
+                                                    <option value="ب">ب</option>
+                                                    <option value="ج">ج</option>
+                                                    <option value="د">د</option>
+                                                </select>
                                             </div>
                                         </div>
                                         {q.correctAnswer === '?' && (
                                             <div className="mb-2 p-2 bg-red-900/30 border border-red-700/50 rounded text-red-200 text-sm flex items-center gap-2">
                                                 <XCircleIcon className="w-4 h-4" />
-                                                <span>هذا السؤال إجابته غير واضحة. يرجى التحقق من صورة الإجابة أدناه.</span>
+                                                <span>هذا السؤال إجابته غير واضحة. يرجى التحقق من صورة الإجابة أدناه وتعديلها.</span>
                                             </div>
                                         )}
                                         {q.questionImage && (

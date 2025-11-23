@@ -1176,7 +1176,7 @@ const App: React.FC = () => {
         attributeFilters: { bank: ['all'], category: ['all'], type: ['all'], selectedTestIds: ['all'] },
     });
 
-    const { data, isLoading: isDataLoading, addTest, addQuestionsToTest, deleteTest, addAttemptToHistory, deleteUserData, addDelayedQuestionToReview, addSpecialLawQuestionToReview, reviewedQuestionIds } = useAppData(activeUserKey, isDevUser, isPreviewMode);
+    const { data, isLoading: isDataLoading, addTest, addQuestionsToTest, deleteTest, updateQuestionAnswer, addAttemptToHistory, deleteUserData, addDelayedQuestionToReview, addSpecialLawQuestionToReview, reviewedQuestionIds } = useAppData(activeUserKey, isDevUser, isPreviewMode);
     
     // --- INTEGRATE PROCESSOR HOOK HERE ---
     const processor = useQuantitativeProcessor(addTest, addQuestionsToTest);
@@ -1292,8 +1292,7 @@ const App: React.FC = () => {
             totalQuestions: currentTest.questions.length,
             answers,
             questions: currentTest.questions,
-            durationSeconds,
-        };
+            durationSeconds,        };
         
         if (!isDevUser || isPreviewMode) {
             addAttemptToHistory(newAttempt);
@@ -1527,7 +1526,17 @@ const App: React.FC = () => {
             
             {page === 'admin' && <AdminView onBack={goBack} onPreviewUser={(userKey) => { setPreviewUserKey(userKey); setIsPreviewMode(true); navigate('home', true); }} onDeleteUser={(userKey) => { deleteUserData(userKey); }} />}
             {page === 'siteManagement' && <SiteManagementView onBack={goBack} onUpdateSettings={(newSettings) => setSettings(newSettings)} />}
-            {page === 'verbalManagement' && <VerbalManagementView data={data} onBack={goBack} onAddTest={addTest} onAddQuestionsToTest={addQuestionsToTest} onDeleteTest={deleteTest} />}
+            
+            {page === 'verbalManagement' && (
+                <VerbalManagementView 
+                    data={data} 
+                    onBack={goBack} 
+                    onAddTest={addTest} 
+                    onAddQuestionsToTest={addQuestionsToTest} 
+                    onDeleteTest={deleteTest}
+                    onUpdateQuestionAnswer={updateQuestionAnswer}
+                />
+            )}
             
             {page === 'quantitativeManagement' && (
                 <QuantitativeManagementView 
@@ -1537,6 +1546,7 @@ const App: React.FC = () => {
                     onAddTest={addTest}
                     onAddQuestionsToTest={addQuestionsToTest}
                     onDeleteTest={deleteTest}
+                    onUpdateQuestionAnswer={updateQuestionAnswer}
                     // Pass processor control
                     processorQueue={processor.queue}
                     isProcessorWorking={processor.isProcessing}

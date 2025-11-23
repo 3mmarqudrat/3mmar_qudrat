@@ -214,6 +214,25 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     });
   };
   
+  const updateQuestionAnswer = (section: Section, testId: string, questionId: string, newAnswer: string, bankKey?: string, categoryKey?: string) => {
+      if (!isDevUser) return;
+      updateDevTestsData(draft => {
+          if (section === 'verbal' && bankKey && categoryKey) {
+              const test = draft.tests.verbal[bankKey]?.[categoryKey]?.find((t: Test) => t.id === testId);
+              if (test) {
+                  const q = test.questions.find(q => q.id === questionId);
+                  if (q) q.correctAnswer = newAnswer;
+              }
+          } else if (section === 'quantitative') {
+              const test = draft.tests.quantitative.find((t: Test) => t.id === testId);
+              if (test) {
+                  const q = test.questions.find(q => q.id === questionId);
+                  if (q) q.correctAnswer = newAnswer;
+              }
+          }
+      });
+  };
+  
   const deleteTest = (section: Section, testId: string, bankKey?: string, categoryKey?: string) => {
     if (!isDevUser) return;
     updateDevTestsData(draft => {
@@ -390,6 +409,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     addTest, 
     addQuestionsToTest, 
     deleteTest, 
+    updateQuestionAnswer,
     addAttemptToHistory, 
     createFolder, 
     addQuestionToFolder, 
