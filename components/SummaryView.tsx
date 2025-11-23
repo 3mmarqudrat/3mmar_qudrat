@@ -1,6 +1,7 @@
+
 import React from 'react';
 import { TestAttempt, User } from '../types';
-import { ArrowRightIcon, CheckCircleIcon, ClockIcon, FileTextIcon, UserIcon, LogOutIcon, XCircleIcon } from './Icons';
+import { ArrowRightIcon, CheckCircleIcon, ClockIcon, FileTextIcon, UserIcon, LogOutIcon, XCircleIcon, ZoomInIcon } from './Icons';
 
 const formatTime = (totalSeconds: number) => {
     const minutes = Math.floor(totalSeconds / 60);
@@ -84,12 +85,18 @@ export const SummaryView: React.FC<{ attempt: TestAttempt, onBack: () => void, o
                     </div>
 
                     <div className="flex flex-col sm:flex-row gap-4 mt-10">
-                         <button onClick={() => onReview(attempt)} className="w-full flex items-center justify-center gap-2 px-8 py-3 bg-primary text-white font-bold rounded-lg transition-all border-2 border-primary hover:border-accent hover:shadow-lg hover:shadow-accent/40">
+                         <button 
+                            onClick={() => onReview(attempt)} 
+                            className="w-full flex items-center justify-center gap-2 px-8 py-3 bg-blue-600 text-white font-bold rounded-lg transition-all shadow-lg hover:shadow-blue-500/30 transform hover:-translate-y-1 hover:brightness-110"
+                         >
                             <FileTextIcon className="w-5 h-5"/>
                             مراجعة الإجابات
                         </button>
-                        <button onClick={onBack} className="w-full flex items-center justify-center gap-2 px-8 py-3 bg-zinc-600 text-slate-200 font-bold rounded-lg hover:bg-zinc-500 transition-colors">
-                             <ArrowRightIcon className="w-5 h-5"/>
+                        <button 
+                            onClick={onBack} 
+                            className="w-full flex items-center justify-center gap-2 px-8 py-3 bg-red-600 text-white font-bold rounded-lg transition-all shadow-lg hover:shadow-red-500/30 transform hover:-translate-y-1 hover:brightness-110"
+                        >
+                             <LogOutIcon className="w-5 h-5"/>
                              المغادرة
                         </button>
                     </div>

@@ -33,7 +33,6 @@ type CropMode = 'none' | 'question' | 'answer';
 const STORAGE_KEY_CROP_CONFIG = 'quantitative_crop_config';
 
 export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProps> = ({ onBack, onStartTest, data, onAddTest, onAddQuestionsToTest, onDeleteTest }) => {
-    // Removed internal useAppData call. Now using props.
     
     // Persistent Config State
     const [cropConfig, setCropConfig] = useState<{ questionBox: CropBox | null, answerBox: CropBox | null }>(() => {
@@ -206,8 +205,13 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
     
     const handleFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
-            setFiles(Array.from(e.target.files));
+            // Append new files instead of replacing
+            setFiles(prev => [...prev, ...Array.from(e.target.files!)]);
         }
+    };
+    
+    const removeFile = (index: number) => {
+        setFiles(prev => prev.filter((_, i) => i !== index));
     };
 
     // Helper to preprocess image for OCR (Thresholding)
@@ -263,7 +267,6 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
         
         // 1. Clean text to remove spaces/invisible chars, ensuring contiguous string
         const clean = text.replace(/[\s\u00A0\u200B\u200C\u200D\u200E\u200F_\-\.]/g, '');
-        console.log("Extraction - Clean Text:", clean);
 
         // 2. List of markers to identify the label part.
         const markers = [
@@ -373,6 +376,58 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
         }
     };
 
+    // Helper function to process a single page
+    const processSinglePage = async (pdf: any, pageIndex: number): Promise<Omit<Question, 'id'> | null> => {
+        try {
+            const page = await pdf.getPage(pageIndex);
+            const viewport = page.getViewport({ scale: 2.0 });
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            if (!ctx) return null;
+
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+            // Crop Question
+            const qData = ctx.getImageData(cropConfig.questionBox!.x, cropConfig.questionBox!.y, cropConfig.questionBox!.width, cropConfig.questionBox!.height);
+            const qCanvas = document.createElement('canvas');
+            qCanvas.width = cropConfig.questionBox!.width;
+            qCanvas.height = cropConfig.questionBox!.height;
+            qCanvas.getContext('2d')!.putImageData(qData, 0, 0);
+            const questionImage = qCanvas.toDataURL('image/jpeg', 0.8);
+
+            // Crop Answer Verification (Image)
+            const aData = ctx.getImageData(cropConfig.answerBox!.x, cropConfig.answerBox!.y, cropConfig.answerBox!.width, cropConfig.answerBox!.height);
+            const aCanvas = document.createElement('canvas');
+            aCanvas.width = cropConfig.answerBox!.width;
+            aCanvas.height = cropConfig.answerBox!.height;
+            aCanvas.getContext('2d')!.putImageData(aData, 0, 0);
+            const answerImage = aCanvas.toDataURL('image/jpeg', 0.8);
+
+            // 1. Attempt Direct PDF Text Extraction (Most Accurate & Fast)
+            let detectedAnswer = await detectAnswerFromPdfText(page, cropConfig.answerBox!);
+
+            // 2. Fallback to OCR (Slow, use only if needed)
+            if (!detectedAnswer) {
+                // console.log(`Fallback to OCR for page ${pageIndex}...`);
+                detectedAnswer = await detectAnswerFromImage(answerImage);
+            }
+
+            return {
+                questionText: 'اختر الإجابة الصحيحة',
+                questionImage: questionImage,
+                verificationImage: answerImage,
+                options: ['أ', 'ب', 'ج', 'د'],
+                correctAnswer: detectedAnswer || 'أ',
+            };
+        } catch (error) {
+            console.error(`Error processing page ${pageIndex}:`, error);
+            return null;
+        }
+    };
+
     const processAndSaveTests = async () => {
         if (!cropConfig.questionBox || !cropConfig.answerBox) {
             alert('يرجى تحديد مناطق القص أولاً في الإعدادات.');
@@ -384,73 +439,61 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
         setProcessStatus('جاري التحضير...');
         setProcessProgress(0);
 
+        // Pre-calculate total work for progress bar
         let totalPagesToProcess = 0;
+        const filePageCounts = new Map<string, number>();
+
         for (const file of files) {
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-            totalPagesToProcess += (pdf.numPages - 1); 
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+                const pagesInFile = pdf.numPages > 1 ? pdf.numPages - 1 : 0; // Skip cover page
+                filePageCounts.set(file.name, pagesInFile);
+                totalPagesToProcess += pagesInFile;
+            } catch (e) {
+                console.error("Error reading PDF metadata:", e);
+            }
         }
 
-        let processedPagesCount = 0;
+        let globalProcessedCount = 0;
+        const CONCURRENCY_LIMIT = 5; // Process 5 pages at a time to speed up without crashing
 
         try {
             for (const file of files) {
                 const rawName = file.name.replace(/\.pdf$/i, '');
                 const testName = rawName.split('-')[0].trim();
+                const totalPages = filePageCounts.get(file.name) || 0;
 
-                setProcessStatus(`جاري معالجة: ${testName}...`);
+                setProcessStatus(`جاري معالجة: ${testName} (${totalPages} صفحة)...`);
 
                 const arrayBuffer = await file.arrayBuffer();
                 const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
                 
+                // Generate array of page numbers to process (skipping page 1)
+                const pageIndices = Array.from({ length: pdf.numPages - 1 }, (_, i) => i + 2);
+                
                 const questionsToAdd: Omit<Question, 'id'>[] = [];
 
-                for (let i = 2; i <= pdf.numPages; i++) {
-                    const page = await pdf.getPage(i);
-                    const viewport = page.getViewport({ scale: 2.0 });
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
-                    canvas.width = viewport.width;
-                    canvas.height = viewport.height;
+                // Process in chunks for concurrency
+                for (let i = 0; i < pageIndices.length; i += CONCURRENCY_LIMIT) {
+                    const chunk = pageIndices.slice(i, i + CONCURRENCY_LIMIT);
+                    
+                    // Run batch in parallel
+                    const results = await Promise.all(
+                        chunk.map(pageIndex => processSinglePage(pdf, pageIndex))
+                    );
 
-                    if (ctx) {
-                        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-                        
-                        // Crop Question
-                        const qData = ctx.getImageData(cropConfig.questionBox.x, cropConfig.questionBox.y, cropConfig.questionBox.width, cropConfig.questionBox.height);
-                        const qCanvas = document.createElement('canvas');
-                        qCanvas.width = cropConfig.questionBox.width;
-                        qCanvas.height = cropConfig.questionBox.height;
-                        qCanvas.getContext('2d')!.putImageData(qData, 0, 0);
-                        const questionImage = qCanvas.toDataURL('image/jpeg', 0.8);
+                    // Collect valid results
+                    results.forEach(res => {
+                        if (res) questionsToAdd.push(res);
+                    });
 
-                        // Crop Answer Verification (Image)
-                        const aData = ctx.getImageData(cropConfig.answerBox.x, cropConfig.answerBox.y, cropConfig.answerBox.width, cropConfig.answerBox.height);
-                        const aCanvas = document.createElement('canvas');
-                        aCanvas.width = cropConfig.answerBox.width;
-                        aCanvas.height = cropConfig.answerBox.height;
-                        aCanvas.getContext('2d')!.putImageData(aData, 0, 0);
-                        const answerImage = aCanvas.toDataURL('image/jpeg', 0.8);
-                        
-                        // 1. Attempt Direct PDF Text Extraction (Most Accurate)
-                        let detectedAnswer = await detectAnswerFromPdfText(page, cropConfig.answerBox);
-
-                        // 2. Fallback to OCR
-                        if (!detectedAnswer) {
-                            console.log("Falling back to OCR for answer detection...");
-                            detectedAnswer = await detectAnswerFromImage(answerImage);
-                        }
-
-                        questionsToAdd.push({
-                            questionText: 'اختر الإجابة الصحيحة',
-                            questionImage: questionImage,
-                            verificationImage: answerImage,
-                            options: ['أ', 'ب', 'ج', 'د'],
-                            correctAnswer: detectedAnswer,
-                        });
+                    // Update progress
+                    globalProcessedCount += chunk.length;
+                    // Debounce progress updates slightly to save rendering time
+                    if (globalProcessedCount % 5 === 0 || globalProcessedCount === totalPagesToProcess) {
+                        setProcessProgress(Math.round((globalProcessedCount / totalPagesToProcess) * 100));
                     }
-                    processedPagesCount++;
-                    setProcessProgress(Math.round((processedPagesCount / totalPagesToProcess) * 100));
                 }
 
                 if (questionsToAdd.length > 0) {
@@ -460,6 +503,7 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
             }
             
             setProcessStatus('تمت العملية بنجاح!');
+            setProcessProgress(100);
             setTimeout(() => {
                 setFiles([]); 
                 setProcessStatus('');
@@ -563,7 +607,9 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
             <h3 className="font-bold text-text-muted mb-4">الاختبارات الحالية</h3>
             <div className="space-y-2">
                 {data.tests.quantitative.length > 0 ? (
-                    data.tests.quantitative.map(test => (
+                    [...data.tests.quantitative]
+                    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+                    .map(test => (
                         <div 
                             key={test.id} 
                             onClick={() => handleTestSelect(test)}
@@ -688,22 +734,31 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
                                 <UploadCloudIcon className="w-20 h-20 mx-auto text-primary mb-6" />
                                 <h2 className="text-2xl font-bold mb-2">إضافة ملفات اختبارات (PDF)</h2>
                                 <p className="text-text-muted mb-6">
-                                    سيتم استخدام الصفحة الأولى كغلاف (تخطي)، والبدء من الصفحة الثانية.<br/>
-                                    سيتم تسمية الاختبار بناءً على اسم الملف (قبل العلامة "-").
+                                    يمكنك تحديد <strong>أكثر من ملف</strong> دفعة واحدة.<br/>
+                                    سيتم إنشاء اختبار منفصل لكل ملف PDF يتم رفعه.
                                 </p>
                                 
                                 {files.length > 0 ? (
-                                    <div className="mb-6 space-y-2 bg-zinc-900/50 p-4 rounded-lg max-h-40 overflow-y-auto text-right">
+                                    <div className="mb-6 space-y-2 bg-zinc-900/50 p-4 rounded-lg max-h-60 overflow-y-auto text-right">
+                                        <div className="flex justify-between items-center mb-2 pb-2 border-b border-zinc-700">
+                                            <span className="text-xs font-bold text-text-muted">{files.length} ملفات جاهزة للمعالجة</span>
+                                            <button onClick={() => setFiles([])} className="text-xs text-red-400 hover:underline">مسح الكل</button>
+                                        </div>
                                         {files.map((f, i) => (
-                                            <div key={i} className="flex items-center gap-2 text-sm">
-                                                <FileTextIcon className="w-4 h-4 text-text-muted" />
-                                                <span>{f.name}</span>
+                                            <div key={i} className="flex items-center justify-between p-2 hover:bg-zinc-800 rounded group">
+                                                <div className="flex items-center gap-2 text-sm truncate">
+                                                    <FileTextIcon className="w-4 h-4 text-text-muted flex-shrink-0" />
+                                                    <span className="truncate">{f.name}</span>
+                                                </div>
+                                                <button onClick={() => removeFile(i)} className="text-red-500 opacity-0 group-hover:opacity-100 hover:bg-zinc-700 p-1 rounded">
+                                                    <TrashIcon className="w-4 h-4" />
+                                                </button>
                                             </div>
                                         ))}
                                     </div>
                                 ) : (
-                                    <label className="inline-block px-8 py-3 bg-zinc-700 hover:bg-zinc-600 rounded-lg cursor-pointer font-bold transition-colors">
-                                        اختر الملفات
+                                    <label className="inline-block px-8 py-3 bg-zinc-700 hover:bg-zinc-600 rounded-lg cursor-pointer font-bold transition-colors shadow-lg">
+                                        تحديد ملفات PDF
                                         <input 
                                             type="file" 
                                             accept="application/pdf" 
@@ -715,22 +770,27 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
                                 )}
 
                                 {files.length > 0 && (
-                                    <div className="mt-6 flex justify-center gap-4">
-                                        <button 
-                                            onClick={() => setFiles([])} 
-                                            className="px-6 py-2 bg-zinc-700 text-slate-300 font-bold rounded-md hover:bg-zinc-600"
-                                            disabled={isProcessing}
-                                        >
-                                            إلغاء
-                                        </button>
-                                        <button 
-                                            onClick={processAndSaveTests} 
-                                            disabled={isProcessing || !cropConfig.questionBox}
-                                            className="px-8 py-2 bg-accent text-white font-bold rounded-md hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
-                                        >
-                                            {isProcessing ? 'جارٍ المعالجة...' : 'إنشاء الاختبارات'}
-                                            <SaveIcon className="w-5 h-5" />
-                                        </button>
+                                    <div className="mt-6 flex flex-col items-center gap-3">
+                                        <div className="flex gap-4">
+                                             <label className="px-6 py-2 bg-zinc-700 text-slate-300 font-bold rounded-md hover:bg-zinc-600 cursor-pointer border border-zinc-600">
+                                                + إضافة المزيد
+                                                <input 
+                                                    type="file" 
+                                                    accept="application/pdf" 
+                                                    multiple 
+                                                    onChange={handleFilesChange}
+                                                    className="hidden"
+                                                />
+                                            </label>
+                                            <button 
+                                                onClick={processAndSaveTests} 
+                                                disabled={isProcessing || !cropConfig.questionBox}
+                                                className="px-8 py-2 bg-accent text-white font-bold rounded-md hover:opacity-90 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-accent/20"
+                                            >
+                                                {isProcessing ? 'جارٍ المعالجة (سريع)...' : `إنشاء ${files.length} اختبارات`}
+                                                <SaveIcon className="w-5 h-5" />
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </div>

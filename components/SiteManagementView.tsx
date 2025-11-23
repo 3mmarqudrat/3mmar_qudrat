@@ -53,24 +53,45 @@ export const SiteManagementView: React.FC<SiteManagementViewProps> = ({ onBack, 
                     <h1 className="text-xl md:text-2xl font-bold text-text mx-auto">إدارة الموقع</h1>
                 </div>
             </header>
-            <main className="container mx-auto p-4 md:p-8 max-w-2xl">
-                <div className="bg-surface p-6 rounded-lg border border-border space-y-4">
-                    <h2 className="text-2xl font-bold mb-4">تفعيل الأقسام (وضع التدريب فقط)</h2>
-                     <p className="text-sm text-text-muted pb-2">
-                        التحكم في ظهور الأقسام للمستخدمين العاديين في <strong>وضع التدريب</strong>. 
-                        <br/>
-                        ملاحظة: الأقسام متاحة دائماً في <strong>وضع المراجعة</strong>.
-                     </p>
-                    <ToggleSwitch 
-                        label="القسم اللفظي" 
-                        enabled={settings.isVerbalEnabled}
-                        onToggle={() => handleToggle('isVerbalEnabled')}
-                    />
-                    <ToggleSwitch 
-                        label="القسم الكمي" 
-                        enabled={settings.isQuantitativeEnabled}
-                        onToggle={() => handleToggle('isQuantitativeEnabled')}
-                    />
+            <main className="container mx-auto p-4 md:p-8 max-w-3xl">
+                <div className="bg-surface p-6 rounded-lg border border-border space-y-8">
+                    
+                    {/* Training Mode Settings */}
+                    <div className="space-y-4">
+                        <h2 className="text-2xl font-bold border-b border-zinc-700 pb-2 text-primary">إعدادات وضع التدريب</h2>
+                        <p className="text-sm text-text-muted pb-2">
+                           التحكم في ظهور الأقسام للمستخدمين عند اختيار "التدريب".
+                        </p>
+                        <ToggleSwitch 
+                            label="القسم اللفظي (تدريب)" 
+                            enabled={settings.isVerbalEnabled}
+                            onToggle={() => handleToggle('isVerbalEnabled')}
+                        />
+                        <ToggleSwitch 
+                            label="القسم الكمي (تدريب)" 
+                            enabled={settings.isQuantitativeEnabled}
+                            onToggle={() => handleToggle('isQuantitativeEnabled')}
+                        />
+                    </div>
+
+                    {/* Review Mode Settings */}
+                    <div className="space-y-4">
+                        <h2 className="text-2xl font-bold border-b border-zinc-700 pb-2 text-primary">إعدادات وضع المراجعة</h2>
+                        <p className="text-sm text-text-muted pb-2">
+                           التحكم في ظهور الأقسام للمستخدمين عند اختيار "المراجعة".
+                        </p>
+                        <ToggleSwitch 
+                            label="القسم اللفظي (مراجعة)" 
+                            enabled={settings.isReviewVerbalEnabled}
+                            onToggle={() => handleToggle('isReviewVerbalEnabled')}
+                        />
+                        <ToggleSwitch 
+                            label="القسم الكمي (مراجعة)" 
+                            enabled={settings.isReviewQuantitativeEnabled}
+                            onToggle={() => handleToggle('isReviewQuantitativeEnabled')}
+                        />
+                    </div>
+
                     <div className="pt-4 flex justify-end items-center gap-4">
                          {saved && <span className="text-sm text-green-400 animate-pulse">تم حفظ التغييرات بنجاح!</span>}
                          <button 

@@ -219,11 +219,6 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     const addQuestionsToReview = (section: Section, questions: Omit<FolderQuestion, 'id'>[]) => {
         if ((isDevUser && !isPreviewMode) || questions.length === 0) return;
 
-        const newQuestionsWithIds: FolderQuestion[] = questions.map(q => ({
-            ...q,
-            id: `q_review_${Date.now()}_${Math.random()}`
-        }));
-
         updateCurrentUserData(draft => {
             const REVIEW_TEST_MAX_QUESTIONS = 75;
             
@@ -235,6 +230,27 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
             }
             
             const reviewTestsInSection = draft.reviewTests[section];
+
+            // 1. Collect all existing original IDs in the review section to prevent duplicates
+            const existingOriginalIds = new Set<string>();
+            reviewTestsInSection.forEach(test => {
+                test.questions.forEach(q => {
+                    const fq = q as FolderQuestion;
+                    if (fq.originalId) existingOriginalIds.add(fq.originalId);
+                });
+            });
+
+            // 2. Filter incoming questions
+            const uniqueQuestionsToAdd = questions.filter(q => {
+                return q.originalId && !existingOriginalIds.has(q.originalId);
+            });
+
+            if (uniqueQuestionsToAdd.length === 0) return;
+
+            const newQuestionsWithIds: FolderQuestion[] = uniqueQuestionsToAdd.map(q => ({
+                ...q,
+                id: `q_review_${Date.now()}_${Math.random()}`
+            }));
             
             let targetTest = reviewTestsInSection.length > 0 ? reviewTestsInSection[reviewTestsInSection.length - 1] : null;
 

@@ -8,9 +8,10 @@ type AuthScreen = 'login' | 'register';
 
 interface AuthViewProps {
     onLoginSuccess: (user: User, rememberMe: boolean) => void;
+    recentUser: User | null;
 }
 
-export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
+export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }) => {
     const [authScreen, setAuthScreen] = useState<AuthScreen>('login');
     const [registrationSuccess, setRegistrationSuccess] = useState(false);
     
@@ -77,6 +78,12 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
         onLoginSuccess(devUser, true);
     };
 
+    const handleQuickLogin = () => {
+        if (recentUser) {
+            onLoginSuccess(recentUser, true);
+        }
+    };
+
     const handleRegister = (e: React.FormEvent) => {
         e.preventDefault();
         setRegistrationError(null);
@@ -107,6 +114,30 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
                     <span className="block sm:inline font-bold">تم إنشاء الحساب بنجاح!</span>
                 </div>
             )}
+            
+            {/* Quick Login Button */}
+            {recentUser && (
+                <div className="border-b border-border pb-6 mb-4">
+                     <p className="text-text-muted text-sm mb-3 text-center">كنت مسجلاً للدخول كـ:</p>
+                     <button 
+                        type="button" 
+                        onClick={handleQuickLogin}
+                        className="w-full flex items-center justify-between p-3 rounded-lg bg-zinc-700 hover:bg-zinc-600 transition-colors border border-primary/50 group"
+                     >
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-primary/20 rounded-full">
+                                <UserIcon className="w-6 h-6 text-primary" />
+                            </div>
+                            <div className="text-right">
+                                <p className="font-bold text-white group-hover:text-primary transition-colors">{recentUser.username}</p>
+                                <p className="text-xs text-text-muted">{recentUser.email}</p>
+                            </div>
+                        </div>
+                        <span className="text-primary font-bold text-sm bg-primary/10 px-3 py-1 rounded-full">دخول سريع</span>
+                     </button>
+                </div>
+            )}
+
             <form onSubmit={handleLogin} className="space-y-4">
                  <div>
                     <label htmlFor="identifier" className="block text-sm font-medium text-text">اسم المستخدم أو البريد الإلكتروني</label>

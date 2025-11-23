@@ -1,8 +1,7 @@
 
-
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Test, UserAnswer, TestAttempt, Question, FolderQuestion, VERBAL_BANKS, VERBAL_CATEGORIES } from '../types';
-import { ArrowRightIcon, ClockIcon, CheckCircleIcon, XCircleIcon, BookmarkIcon, ChevronDownIcon, InfoIcon, FileTextIcon, EyeIcon, ZoomInIcon, StarIcon } from './Icons';
+import { ArrowRightIcon, ClockIcon, CheckCircleIcon, XCircleIcon, BookmarkIcon, ChevronDownIcon, InfoIcon, FileTextIcon, EyeIcon, ZoomInIcon, StarIcon, LogOutIcon } from './Icons';
 
 const formatTime = (totalSeconds: number) => {
     const minutes = Math.floor(totalSeconds / 60);
@@ -43,15 +42,15 @@ const QuestionAccordion: React.FC<{
     
     const getOptionClass = (option: string) => {
         if (!isReviewMode) {
-             return userAnswer === option ? 'bg-sky-700 text-white ring-2 ring-sky-300 shadow-lg shadow-sky-500/20' : 'bg-zinc-800 hover:bg-zinc-700 border-border hover:border-border-hover';
+             return userAnswer === option ? 'bg-sky-700 text-white ring-2 ring-sky-300 shadow-lg shadow-sky-500/20' : 'bg-surface hover:bg-zinc-700/50 border-zinc-700 hover:border-zinc-500';
         }
         
         // Review Mode Styling
         const isCorrect = option === question.correctAnswer;
         const isSelected = option === userAnswer;
 
-        if (isCorrect) return 'bg-green-500/80 border-green-400 text-white';
-        if (isSelected && !isCorrect) return 'bg-red-500/80 border-red-400 text-white';
+        if (isCorrect) return 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(22,163,74,0.4)]';
+        if (isSelected && !isCorrect) return 'bg-red-600 border-red-500 text-white shadow-[0_0_10px_rgba(220,38,38,0.4)]';
         
         return 'bg-zinc-800 border-border opacity-60';
     };
@@ -63,10 +62,10 @@ const QuestionAccordion: React.FC<{
     return (
         <div className="bg-surface rounded-lg border border-border overflow-hidden">
             <div 
-                className={`flex justify-between items-center p-4 ${(!isQuantitative && (hasAnswered || isReviewMode)) ? 'cursor-pointer' : 'cursor-default'} transition-colors hover:bg-zinc-700/30`}
+                className={`flex justify-between items-center p-4 ${(!isQuantitative && (hasAnswered || isReviewMode)) ? 'cursor-pointer' : 'cursor-default'}`}
                 onClick={handleHeaderClick}
             >
-                <div className="flex items-center gap-4 w-full">
+                <div className="flex items-center gap-4 w-full overflow-hidden">
                      <div className="flex-shrink-0 flex items-center gap-2">
                         {isReviewTest && (
                             <button onClick={(e) => { e.stopPropagation(); onShowInfo(); }} className="p-2 rounded-full hover:bg-zinc-600 transition-colors" title="معلومات السؤال">
@@ -75,7 +74,7 @@ const QuestionAccordion: React.FC<{
                         )}
                         {!isReviewMode && !isReviewTest && (
                             <>
-                                <button onClick={(e) => { e.stopPropagation(); onToggleFlag(); }} disabled={isFlagButtonDisabled} className="p-2 rounded-full hover:bg-zinc-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title={isFlagButtonDisabled ? "هذا السؤال تمت إضافته للمراجعة بالفعل" : "إضافة السؤال للمراجعة"}>
+                                <button onClick={(e) => { e.stopPropagation(); onToggleFlag(); }} disabled={isFlagButtonDisabled} className="p-2 rounded-full hover:bg-zinc-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title={isFlagButtonDisabled ? "هذا السؤال تمت إضافته للمراجعة بالفعل" : "تأجيل / إضافة للمراجعة"}>
                                     <BookmarkIcon className="w-5 h-5 text-yellow-400" isFilled={isFlagged} />
                                 </button>
                                 {isQuantitative && (
@@ -86,12 +85,12 @@ const QuestionAccordion: React.FC<{
                             </>
                         )}
                      </div>
-                    <div className="w-full">
+                    <div className="w-full overflow-hidden">
                          <div className="text-xl font-semibold leading-relaxed text-right flex justify-between items-center gap-4" style={{color: 'var(--color-gold)'}}>
                             <div className="flex flex-col gap-1 w-full">
                                 <div className="flex justify-between items-start w-full">
-                                     <span>
-                                        <span className="text-text-muted">{qNumber}. </span>
+                                     <span className="break-words w-full">
+                                        <span className="text-text-muted select-none">{qNumber}. </span>
                                         {question.questionText}
                                     </span>
                                 </div>
@@ -103,8 +102,8 @@ const QuestionAccordion: React.FC<{
                                         </span>
                                         {/* Show Verification Image Automatically in Review Mode - Increased size for better visibility */}
                                         {question.verificationImage && (
-                                            <div className="flex items-center gap-2 bg-zinc-900/50 px-2 py-1 rounded border border-zinc-700">
-                                                <span className="text-xs text-text-muted">المصدر:</span>
+                                            <div className="flex items-center gap-2 bg-zinc-900/50 px-2 py-1 rounded border border-zinc-700 max-w-full overflow-hidden">
+                                                <span className="text-xs text-text-muted flex-shrink-0">المصدر:</span>
                                                 <img src={question.verificationImage} alt="Answer Source" className="h-16 object-contain rounded-sm bg-white" />
                                             </div>
                                         )}
@@ -112,7 +111,7 @@ const QuestionAccordion: React.FC<{
                                 )}
                             </div>
                              {isReviewTest && sourceSectionName && (
-                                <div className="flex flex-col items-end gap-1 text-xs font-mono flex-shrink-0">
+                                <div className="flex flex-col items-end gap-1 text-xs font-mono flex-shrink-0 hidden sm:flex">
                                     <span className="bg-zinc-700 text-cyan-400 px-2 py-1 rounded-md">{sourceSectionName}</span>
                                     {reviewType === 'mistake' && <span className="bg-red-900/70 text-red-300 px-2 py-1 rounded-md">(خطأ)</span>}
                                     {reviewType === 'delay' && <span className="bg-yellow-800/70 text-yellow-300 px-2 py-1 rounded-md">(تأخير)</span>}
@@ -140,36 +139,45 @@ const QuestionAccordion: React.FC<{
                     </div>
                 </div>
                 {!isQuantitative && (hasAnswered || isReviewMode) && (
-                     <ChevronDownIcon className={`w-6 h-6 text-text-muted transition-transform flex-shrink-0 ${isCollapsed ? '' : 'rotate-180'}`} />
+                     <ChevronDownIcon className={`w-6 h-6 text-text-muted transition-transform duration-300 flex-shrink-0 ${isCollapsed ? '' : 'rotate-180'}`} />
                 )}
             </div>
-            {!isCollapsed && (
-                 <div className="p-4 border-t border-border">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {question.options.map((option, index) => (
-                            <button 
-                                key={index} 
-                                onClick={() => onSelectAnswer(option)} 
-                                disabled={isReviewMode}
-                                className={`w-full text-right p-4 rounded-lg border text-lg font-medium transition-all duration-200 flex items-center gap-4 ${getOptionClass(option)} ${!isReviewMode && 'disabled:opacity-50'}`}
-                            >
-                                {isReviewMode && (
-                                    <span className="inline-block">
-                                        {option === question.correctAnswer && <CheckCircleIcon className="w-6 h-6 text-white"/>}
-                                        {option === userAnswer && option !== question.correctAnswer && <XCircleIcon className="w-6 h-6 text-white"/>}
-                                    </span>
-                                )}
-                                {option}
-                            </button>
-                        ))}
-                    </div>
-                    {isReviewMode && userAnswer === undefined && (
-                        <div className="mt-4 text-center p-3 bg-red-900/40 border border-red-700 rounded-md">
-                            <p className="font-bold text-red-400">لم يتم حل السؤال</p>
+            
+            <div 
+                className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+                    isCollapsed 
+                    ? 'grid-rows-[0fr] opacity-0' 
+                    : 'grid-rows-[1fr] opacity-100'
+                }`}
+            >
+                 <div className="overflow-hidden">
+                    <div className="p-4 border-t border-border bg-black/10">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {question.options.map((option, index) => (
+                                <button 
+                                    key={index} 
+                                    onClick={() => onSelectAnswer(option)} 
+                                    disabled={isReviewMode}
+                                    className={`w-full text-right p-4 rounded-lg border text-lg font-medium transition-all duration-200 flex items-center gap-4 ${getOptionClass(option)} ${!isReviewMode && 'disabled:opacity-50'}`}
+                                >
+                                    {isReviewMode && (
+                                        <span className="inline-block flex-shrink-0">
+                                            {option === question.correctAnswer && <CheckCircleIcon className="w-6 h-6 text-white"/>}
+                                            {option === userAnswer && option !== question.correctAnswer && <XCircleIcon className="w-6 h-6 text-white"/>}
+                                        </span>
+                                    )}
+                                    <span className="break-words">{option}</span>
+                                </button>
+                            ))}
                         </div>
-                    )}
+                        {isReviewMode && userAnswer === undefined && (
+                            <div className="mt-4 text-center p-3 bg-red-900/40 border border-red-700 rounded-md">
+                                <p className="font-bold text-red-400">لم يتم حل السؤال</p>
+                            </div>
+                        )}
+                     </div>
                  </div>
-            )}
+            </div>
         </div>
     )
 }
@@ -367,30 +375,55 @@ export const TakeTestView: React.FC<TakeTestViewProps> = ({ test, onFinishTest, 
 
     return (
         <div className="bg-bg min-h-screen flex flex-col">
-             <header className="bg-surface/80 backdrop-blur-lg p-4 sticky top-0 z-20 border-b border-border">
-                <div className="container mx-auto grid grid-cols-3 items-center">
-                     <div className="flex justify-start">
-                        <button onClick={handleBackNavigation} className="p-2 rounded-full hover:bg-zinc-700 transition-colors">
-                           <ArrowRightIcon className="w-6 h-6 text-text-muted"/>
+             <header className="bg-surface/80 backdrop-blur-lg p-4 sticky top-0 z-20 border-b border-border shadow-md">
+                {/* Header Grid:
+                    RTL Layout:
+                    Column 1 (Right): Back Button + Title (Switched as requested)
+                    Column 2 (Center): Filters
+                    Column 3 (Left): Timer
+                */}
+                <div className="container mx-auto grid grid-cols-2 md:grid-cols-12 items-center gap-4">
+                    
+                    {/* 1. Back Button & Title (Right Side) */}
+                    <div className="col-span-2 md:col-span-3 flex justify-start items-center gap-3 order-1">
+                         <button onClick={handleBackNavigation} className="p-2 rounded-full bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition-colors">
+                           <ArrowRightIcon className="w-5 h-5 text-text-muted"/>
                         </button>
-                     </div>
-                    <div className="text-center">
-                        <h1 className="text-xl font-bold text-text truncate">{isReviewMode ? `مراجعة: ${test.name}` : test.name}</h1>
+                        <h1 className="text-lg md:text-xl font-bold text-text truncate max-w-full text-right" title={test.name}>{isReviewMode ? `مراجعة: ${test.name}` : test.name}</h1>
                     </div>
-                    <div className="flex justify-end">
-                        { !isReviewMode ? (
-                            <div className="flex items-center gap-2 font-mono text-lg p-2 bg-zinc-700 rounded-md w-28 justify-center">
-                               <ClockIcon className="w-5 h-5 text-accent"/> <span>{formatTime(elapsedTime)}</span>
-                            </div>
-                        ) : (
-                             <div className="flex items-center gap-2 bg-zinc-700 p-1 rounded-lg">
-                                <button onClick={() => setReviewFilter('all')} className={`px-5 py-2 text-base font-bold rounded-md transition-colors flex items-center gap-2 ${reviewFilter === 'all' ? 'bg-primary text-white' : 'text-text-muted hover:bg-zinc-600'}`}>الكل <span className="text-xs opacity-80">({reviewSummary.all})</span></button>
-                                <button onClick={() => setReviewFilter('correct')} className={`px-5 py-2 text-base font-bold rounded-md transition-colors flex items-center gap-2 ${reviewFilter === 'correct' ? 'bg-green-600 text-white' : 'text-text-muted hover:bg-zinc-600'}`}>الصحيحة <span className="text-xs opacity-80">({reviewSummary.correct})</span></button>
-                                <button onClick={() => setReviewFilter('incorrect')} className={`px-5 py-2 text-base font-bold rounded-md transition-colors flex items-center gap-2 ${reviewFilter === 'incorrect' ? 'bg-red-600 text-white' : 'text-text-muted hover:bg-zinc-600'}`}>الخاطئة <span className="text-xs opacity-80">({reviewSummary.incorrect})</span></button>
-                                <button onClick={() => setReviewFilter('unanswered')} className={`px-5 py-2 text-base font-bold rounded-md transition-colors flex items-center gap-2 ${reviewFilter === 'unanswered' ? 'bg-yellow-600 text-white' : 'text-text-muted hover:bg-zinc-600'}`}>المتروكة <span className="text-xs opacity-80">({reviewSummary.unanswered})</span></button>
+
+                    {/* 2. Filters (Center) - Spans full width on mobile if needed */}
+                    <div className="col-span-2 md:col-span-6 flex justify-center order-3 md:order-2 w-full">
+                        {isReviewMode && (
+                             <div className="flex flex-wrap justify-center items-center gap-2 bg-black/40 p-1.5 rounded-lg border border-zinc-700/50 backdrop-blur-sm w-full md:w-auto shadow-inner">
+                                <button onClick={() => setReviewFilter('all')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center justify-center gap-2 ${reviewFilter === 'all' ? 'bg-zinc-100 text-black shadow-lg' : 'text-zinc-300 hover:bg-white/10'}`}>
+                                    <span>الكل</span>
+                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'all' ? 'bg-black/20 text-black' : 'bg-black/40 text-white'}`}>{reviewSummary.all}</span>
+                                </button>
+                                <button onClick={() => setReviewFilter('correct')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center justify-center gap-2 ${reviewFilter === 'correct' ? 'bg-green-500 text-white shadow-lg' : 'text-zinc-300 hover:bg-white/10'}`}>
+                                    <span>الصحيحة</span>
+                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'correct' ? 'bg-black/20' : 'bg-black/40'}`}>{reviewSummary.correct}</span>
+                                </button>
+                                <button onClick={() => setReviewFilter('incorrect')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center justify-center gap-2 ${reviewFilter === 'incorrect' ? 'bg-red-500 text-white shadow-lg' : 'text-zinc-300 hover:bg-white/10'}`}>
+                                    <span>الخاطئة</span>
+                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'incorrect' ? 'bg-black/20' : 'bg-black/40'}`}>{reviewSummary.incorrect}</span>
+                                </button>
+                                <button onClick={() => setReviewFilter('unanswered')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center justify-center gap-2 ${reviewFilter === 'unanswered' ? 'bg-yellow-500 text-white shadow-lg' : 'text-zinc-300 hover:bg-white/10'}`}>
+                                    <span>المتروكة</span>
+                                    <span className={`px-1.5 rounded-full text-xs ${reviewFilter === 'unanswered' ? 'bg-black/20' : 'bg-black/40'}`}>{reviewSummary.unanswered}</span>
+                                </button>
                             </div>
                         )}
                     </div>
+                    
+                     {/* 3. Timer (Left Side) */}
+                     <div className="col-span-1 md:col-span-3 flex items-center justify-end gap-3 order-2 md:order-3">
+                        { !isReviewMode && (
+                             <div className="font-mono text-xl text-cyan-400 bg-black/40 px-3 py-1.5 rounded-lg border border-cyan-500/30 shadow-[0_0_15px_-3px_rgba(6,182,212,0.3)] flex items-center gap-2">
+                               <ClockIcon className="w-5 h-5"/> <span>{formatTime(elapsedTime)}</span>
+                            </div>
+                        )}
+                     </div>
                 </div>
             </header>
             
@@ -425,8 +458,8 @@ export const TakeTestView: React.FC<TakeTestViewProps> = ({ test, onFinishTest, 
                     </div>
                  )}
                 {!isReviewMode && (
-                    <div className="mt-12 text-center">
-                         <button onClick={handleFinish} className="px-12 py-3 bg-accent border-2 border-accent text-white font-bold rounded-lg hover:opacity-90 transition-all duration-200 hover:scale-105 text-lg transform">
+                    <div className="mt-12 text-center pb-8">
+                         <button onClick={handleFinish} className="px-12 py-3 bg-accent border-2 border-accent text-white font-bold rounded-lg hover:opacity-90 transition-all duration-200 hover:scale-105 text-lg transform shadow-xl shadow-accent/20">
                              إنهاء الاختبار
                          </button>
                     </div>
@@ -434,14 +467,20 @@ export const TakeTestView: React.FC<TakeTestViewProps> = ({ test, onFinishTest, 
             </main>
 
             {isReviewMode && (
-                <footer className="bg-surface/80 backdrop-blur-lg p-4 sticky bottom-0 z-20 border-t border-border mt-8">
-                    <div className="container mx-auto flex justify-center items-center gap-4">
-                         <button onClick={onBackToSummary} className="px-8 py-3 bg-transparent text-slate-200 font-bold rounded-lg transition-all flex items-center gap-2 transform hover:scale-105 border-2 border-primary hover:shadow-lg hover:shadow-primary/30">
+                <footer className="bg-surface/90 backdrop-blur-xl p-4 sticky bottom-0 z-20 border-t border-border mt-8 shadow-2xl">
+                    <div className="container mx-auto flex justify-center items-center gap-6">
+                         <button 
+                            onClick={onBackToSummary} 
+                            className="px-8 py-2.5 bg-blue-600 text-white font-bold rounded-lg transition-all flex items-center gap-2 transform hover:scale-105 shadow-lg shadow-blue-500/20 hover:bg-blue-500"
+                        >
                              <FileTextIcon className="w-5 h-5"/>
                              عرض النتائج
                          </button>
-                         <button onClick={onBackToSection} className="px-8 py-3 bg-zinc-600 text-slate-200 font-bold rounded-lg hover:bg-zinc-500 transition-colors flex items-center gap-2 transform hover:scale-105">
-                             <ArrowRightIcon className="w-5 h-5"/>
+                         <button 
+                            onClick={onBackToSection} 
+                            className="px-8 py-2.5 bg-red-600 text-white font-bold rounded-lg hover:bg-red-500 transition-colors flex items-center gap-2 shadow-lg shadow-red-500/20"
+                        >
+                             <LogOutIcon className="w-5 h-5"/>
                              المغادرة
                          </button>
                     </div>

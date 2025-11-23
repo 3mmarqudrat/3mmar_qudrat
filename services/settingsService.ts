@@ -1,13 +1,19 @@
+
 export interface AppSettings {
     isQuantitativeEnabled: boolean;
     isVerbalEnabled: boolean;
+    // New settings for Review Mode
+    isReviewQuantitativeEnabled: boolean;
+    isReviewVerbalEnabled: boolean;
 }
 
 const SETTINGS_KEY = 'qudratAppSettings';
 
 const defaultSettings: AppSettings = {
-    isQuantitativeEnabled: false, // Disabled by default for users
+    isQuantitativeEnabled: false,
     isVerbalEnabled: true,
+    isReviewQuantitativeEnabled: true, // Default enabled
+    isReviewVerbalEnabled: true,      // Default enabled
 };
 
 export const settingsService = {
