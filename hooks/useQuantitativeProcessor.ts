@@ -4,8 +4,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { Question, Section } from '../types';
 
 // Configure PDF.js worker
-// Ensure version matches the one in index.html (4.0.379)
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
+// Ensure version matches the one in package.json (3.11.174)
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
 // Declare Tesseract globally
 declare const Tesseract: any;
@@ -85,8 +85,8 @@ export const useQuantitativeProcessor = (
 
     const extractAnswerFromText = (text: string): string | null => {
         if (!text) return null;
-        // Do not remove colons or parens to preserve context
-        const clean = text.replace(/[\s\u00A0\u200B\u200C\u200D\u200E\u200F_\-\.]/g, '');
+        // Normalize text to handle isolated Alif forms (e.g., U+FE8D)
+        const clean = text.normalize('NFKC').replace(/[\s\u00A0\u200B\u200C\u200D\u200E\u200F_\-\.]/g, '');
         const markers = ['الصحيحة', 'الصحيحه', 'الاجابة', 'الإجابة', 'الأجابة', 'الجواب'];
         
         let lastIndex = -1;
@@ -138,8 +138,9 @@ export const useQuantitativeProcessor = (
             }
             
             // Critical Fix for Arabic: Sort Right-to-Left (b.x - a.x) instead of Left-to-Right
-            // This ensures "الإجابة الصحيحة: أ" is read in correct logical order where 'أ' follows the label
-            foundItems.sort((a, b) => Math.abs(a.y - b.y) > 5 ? a.y - b.y : b.x - a.x);
+            // This ensures "الإجابة الصحيحة: أ" is read in correct logical order where 'أ' follows the label.
+            // Increased Y tolerance to 10 to handle slight vertical misalignments of the letter A.
+            foundItems.sort((a, b) => Math.abs(a.y - b.y) > 10 ? a.y - b.y : b.x - a.x);
             
             const rawText = foundItems.map(i => i.str).join('');
             return extractAnswerFromText(rawText);

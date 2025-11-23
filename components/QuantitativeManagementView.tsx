@@ -5,8 +5,8 @@ import { Question, Test, AppData, Section } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure PDF.js worker
-// Fixed: Use version 4.0.379 to match importmap
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
+// Fixed: Use version 3.11.174 to match package.json
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
 interface QuantitativeManagementViewProps {
     onBack: () => void;
