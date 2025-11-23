@@ -4,7 +4,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { Question, Section } from '../types';
 
 // Configure PDF.js worker
-// Fixed: Use version 4.0.379 to match importmap
+// Ensure version matches the one in index.html (4.0.379)
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
 
 // Declare Tesseract globally
@@ -85,6 +85,7 @@ export const useQuantitativeProcessor = (
 
     const extractAnswerFromText = (text: string): string | null => {
         if (!text) return null;
+        // Do not remove colons or parens to preserve context
         const clean = text.replace(/[\s\u00A0\u200B\u200C\u200D\u200E\u200F_\-\.]/g, '');
         const markers = ['الصحيحة', 'الصحيحه', 'الاجابة', 'الإجابة', 'الأجابة', 'الجواب'];
         
@@ -135,7 +136,11 @@ export const useQuantitativeProcessor = (
                     foundItems.push({ str: item.str, x: vx, y: vy });
                 }
             }
-            foundItems.sort((a, b) => Math.abs(a.y - b.y) > 5 ? a.y - b.y : a.x - b.x);
+            
+            // Critical Fix for Arabic: Sort Right-to-Left (b.x - a.x) instead of Left-to-Right
+            // This ensures "الإجابة الصحيحة: أ" is read in correct logical order where 'أ' follows the label
+            foundItems.sort((a, b) => Math.abs(a.y - b.y) > 5 ? a.y - b.y : b.x - a.x);
+            
             const rawText = foundItems.map(i => i.str).join('');
             return extractAnswerFromText(rawText);
         } catch (e) {
