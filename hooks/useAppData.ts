@@ -245,6 +245,20 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
       }
     });
   };
+  
+  // New function for bulk deletion
+  const deleteTests = (section: Section, testIds: string[], bankKey?: string, categoryKey?: string) => {
+    if (!isDevUser || testIds.length === 0) return;
+    updateDevTestsData(draft => {
+        if (section === 'quantitative') {
+            draft.tests.quantitative = draft.tests.quantitative.filter(test => !testIds.includes(test.id));
+        } else if (section === 'verbal' && bankKey && categoryKey) {
+            if (draft.tests.verbal[bankKey] && draft.tests.verbal[bankKey][categoryKey]) {
+                draft.tests.verbal[bankKey][categoryKey] = draft.tests.verbal[bankKey][categoryKey].filter((t: Test) => !testIds.includes(t.id));
+             }
+        }
+    });
+  };
 
     const addQuestionsToReview = (section: Section, questions: Omit<FolderQuestion, 'id'>[]) => {
         if ((isDevUser && !isPreviewMode) || questions.length === 0) return;
@@ -408,7 +422,8 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     isLoading, // Export loading state
     addTest, 
     addQuestionsToTest, 
-    deleteTest, 
+    deleteTest,
+    deleteTests, // Export bulk delete
     updateQuestionAnswer,
     addAttemptToHistory, 
     createFolder, 

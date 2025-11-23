@@ -15,6 +15,7 @@ interface QuantitativeManagementViewProps {
     onAddTest: (section: Section, testName: string, bankKey?: string, categoryKey?: string, sourceText?: string) => string;
     onAddQuestionsToTest: (section: Section, testId: string, questions: Omit<Question, 'id'>[], bankKey?: string, categoryKey?: string) => void;
     onDeleteTest: (section: Section, testId: string, bankKey?: string, categoryKey?: string) => void;
+    onDeleteTests: (section: Section, testIds: string[], bankKey?: string, categoryKey?: string) => void; // New prop
     onUpdateQuestionAnswer: (section: Section, testId: string, questionId: string, newAnswer: string, bankKey?: string, categoryKey?: string) => void;
 
     // New Props for Global Processing
@@ -41,6 +42,7 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
     onStartTest, 
     data, 
     onDeleteTest,
+    onDeleteTests,
     onUpdateQuestionAnswer,
     processorQueue,
     isProcessorWorking,
@@ -58,6 +60,10 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
     const [viewMode, setViewMode] = useState<ViewMode>('upload');
     const [zoom, setZoom] = useState<number>(100); 
     const [selectedTest, setSelectedTest] = useState<Test | null>(null);
+    
+    // Bulk Selection State
+    const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(new Set());
+    const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
     
     // Local File Staging (Before adding to queue)
     const [stagedFiles, setStagedFiles] = useState<File[]>([]);
@@ -238,31 +244,96 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
         setViewMode('details');
     };
 
-    const Sidebar = () => (
-        <aside className="w-1/4 p-4 border-l border-border overflow-y-auto bg-surface/30 hidden md:block">
-            <h3 className="font-bold text-text-muted mb-4">الاختبارات الحالية</h3>
-            <div className="space-y-2">
-                {data.tests.quantitative.length > 0 ? (
-                    [...data.tests.quantitative]
-                    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
-                    .map(test => (
-                        <div 
-                            key={test.id} 
-                            onClick={() => handleTestSelect(test)}
-                            className={`bg-zinc-800 p-3 rounded-md text-sm flex justify-between items-center group cursor-pointer hover:bg-zinc-700 transition-colors ${selectedTest?.id === test.id ? 'border border-primary' : ''}`}
-                        >
-                            <span className="truncate pl-2 font-bold">{test.name}</span>
-                            <button onClick={(e) => { e.stopPropagation(); if(confirm('حذف الاختبار؟')) { onDeleteTest('quantitative', test.id); if(selectedTest?.id === test.id) setSelectedTest(null); } }} className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:bg-zinc-600 p-1 rounded">
-                                <TrashIcon className="w-4 h-4"/>
-                            </button>
-                        </div>
-                    ))
-                ) : (
-                    <p className="text-xs text-text-muted">لا توجد اختبارات.</p>
+    // --- Bulk Delete Logic ---
+    const handleToggleSelectTest = (testId: string) => {
+        setSelectedTestIds(prev => {
+            const next = new Set(prev);
+            if (next.has(testId)) {
+                next.delete(testId);
+            } else {
+                next.add(testId);
+            }
+            return next;
+        });
+    };
+
+    const handleSelectAll = () => {
+        if (selectedTestIds.size === data.tests.quantitative.length) {
+            setSelectedTestIds(new Set()); // Deselect all
+        } else {
+            setSelectedTestIds(new Set(data.tests.quantitative.map(t => t.id))); // Select all
+        }
+    };
+
+    const confirmBulkDelete = () => {
+        if (selectedTestIds.size === 0) return;
+        onDeleteTests('quantitative', Array.from(selectedTestIds));
+        
+        // If current viewing test was deleted, go back
+        if (selectedTest && selectedTestIds.has(selectedTest.id)) {
+            setSelectedTest(null);
+            setViewMode('upload');
+        }
+        
+        setSelectedTestIds(new Set());
+        setShowBulkDeleteConfirm(false);
+    };
+
+    const Sidebar = () => {
+        const sortedTests = [...data.tests.quantitative]
+            .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+        
+        return (
+            <aside className="w-1/4 p-4 border-l border-border overflow-y-auto bg-surface/30 hidden md:flex md:flex-col h-full">
+                <div className="flex justify-between items-center mb-4 pb-2 border-b border-zinc-700">
+                    <h3 className="font-bold text-text-muted">الاختبارات ({sortedTests.length})</h3>
+                    {sortedTests.length > 0 && (
+                         <div className="flex items-center gap-2">
+                             <button onClick={handleSelectAll} className="text-xs text-primary hover:underline">
+                                 {selectedTestIds.size === sortedTests.length ? 'إلغاء' : 'الكل'}
+                             </button>
+                         </div>
+                    )}
+                </div>
+                
+                {selectedTestIds.size > 0 && (
+                    <button 
+                        onClick={() => setShowBulkDeleteConfirm(true)} 
+                        className="w-full mb-3 bg-red-900/80 text-white py-2 rounded-md text-sm font-bold hover:bg-red-800 transition-colors flex items-center justify-center gap-2 shadow-lg"
+                    >
+                        <TrashIcon className="w-4 h-4" />
+                        حذف المحدد ({selectedTestIds.size})
+                    </button>
                 )}
-            </div>
-        </aside>
-    );
+
+                <div className="space-y-2 flex-grow overflow-y-auto pr-1 custom-scrollbar">
+                    {sortedTests.length > 0 ? (
+                        sortedTests.map(test => (
+                            <div 
+                                key={test.id} 
+                                className={`bg-zinc-800 p-2 rounded-md text-sm flex items-center gap-2 group transition-colors ${selectedTest?.id === test.id ? 'border border-primary' : ''}`}
+                            >
+                                <input 
+                                    type="checkbox" 
+                                    checked={selectedTestIds.has(test.id)}
+                                    onChange={() => handleToggleSelectTest(test.id)}
+                                    className="w-4 h-4 rounded border-zinc-600 bg-zinc-700 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                                />
+                                <div 
+                                    onClick={() => handleTestSelect(test)}
+                                    className="flex-grow flex justify-between items-center cursor-pointer"
+                                >
+                                    <span className="truncate pl-2 font-bold select-none">{test.name}</span>
+                                </div>
+                            </div>
+                        ))
+                    ) : (
+                        <p className="text-xs text-text-muted text-center py-4">لا توجد اختبارات.</p>
+                    )}
+                </div>
+            </aside>
+        );
+    };
     
     // --- Render Queue Status ---
     const renderQueue = () => {
@@ -569,6 +640,24 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
                     )}
                 </main>
             </div>
+             {/* Bulk Delete Confirm Modal */}
+             {showBulkDeleteConfirm && (
+                <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 backdrop-blur-sm">
+                    <div className="bg-surface rounded-lg p-8 m-4 max-w-sm w-full text-center shadow-2xl border border-border">
+                        <TrashIcon className="w-16 h-16 mx-auto text-red-500 mb-4"/>
+                        <h2 className="text-xl font-bold mb-4">تأكيد الحذف الجماعي</h2>
+                        <p className="text-text-muted mb-6">
+                            هل أنت متأكد من رغبتك في حذف <strong>{selectedTestIds.size}</strong> اختبارات؟
+                            <br/>
+                            <span className="text-red-400 text-sm mt-2 block">لا يمكن التراجع عن هذا الإجراء.</span>
+                        </p>
+                        <div className="flex justify-center gap-4">
+                            <button onClick={() => setShowBulkDeleteConfirm(false)} className="px-6 py-2 bg-zinc-600 text-slate-200 rounded-md hover:bg-zinc-500 transition-colors font-semibold">إلغاء</button>
+                            <button onClick={confirmBulkDelete} className="px-6 py-2 text-white rounded-md bg-red-600 hover:bg-red-700 transition-colors font-bold shadow-lg shadow-red-900/20">حذف نهائي</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
