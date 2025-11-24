@@ -1428,9 +1428,9 @@ const App: React.FC = () => {
                 <AdminView 
                     onBack={goBack} 
                     onPreviewUser={(userKey) => { /* Not implemented for FB */ }} 
-                    onDeleteUser={(userKey) => { 
-                        authService.deleteUser(userKey);
-                        deleteUserData(userKey); 
+                    onDeleteUser={async (userKey) => { 
+                        await authService.deleteUser(userKey);
+                        await deleteUserData(userKey); 
                     }} 
                 />
             )}

