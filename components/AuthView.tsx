@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { authService, RegistrationError } from '../services/authService';
-import { BookOpenIcon, UserIcon, MailIcon, KeyIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, UploadCloudIcon } from './Icons';
+import { BookOpenIcon, UserIcon, MailIcon, KeyIcon, EyeIcon, EyeOffIcon, CheckCircleIcon } from './Icons';
 import { User } from '../types';
 
 type AuthScreen = 'login' | 'register';
@@ -264,10 +264,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                 <h2 className="mt-6 text-center text-3xl font-bold text-text">
                     {titles[authScreen]}
                 </h2>
-                <div className="flex items-center justify-center gap-2 mt-2 text-green-400 text-xs font-bold bg-green-900/20 py-1 px-3 rounded-full w-fit mx-auto border border-green-900">
-                    <UploadCloudIcon className="w-3 h-3" />
-                    v2.0 (Cloud Connected)
-                </div>
             </div>
             <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
                 <div className="bg-surface py-8 px-4 shadow-2xl sm:rounded-xl sm:px-10 border" style={{borderColor: 'var(--color-border)'}}>
