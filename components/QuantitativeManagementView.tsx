@@ -5,8 +5,8 @@ import { Question, Test, AppData, Section } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure PDF.js worker
-// Fixed: Use version 4.0.379 to match importmap
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
+// Fixed: Use version 3.11.174 to match importmap
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
 interface QuantitativeManagementViewProps {
     onBack: () => void;
@@ -265,54 +265,70 @@ export const QuantitativeManagementView: React.FC<QuantitativeManagementViewProp
             }
         }
     };
+    
+    // --- Sorting Logic ---
+    const getTestNumber = (name: string) => {
+        // Normalize Arabic numerals to English (٠-٩ -> 0-9)
+        const normalized = name.replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString());
+        const match = normalized.match(/\d+/);
+        return match ? parseInt(match[0], 10) : 0;
+    };
 
-    const Sidebar = () => (
-        <aside className="w-1/4 p-4 border-l border-border overflow-y-auto bg-surface/30 hidden md:block">
-            <div className="flex justify-between items-center mb-4">
-                 <h3 className="font-bold text-text-muted">الاختبارات الحالية</h3>
-                 {selectedIds.size > 0 && (
-                     <button onClick={deleteSelected} className="text-red-400 hover:text-red-300 text-xs font-bold">حذف المحدد ({selectedIds.size})</button>
-                 )}
-            </div>
-             <div className="mb-2 flex items-center gap-2 px-3">
-                <input 
-                    type="checkbox" 
-                    checked={data.tests.quantitative.length > 0 && selectedIds.size === data.tests.quantitative.length}
-                    onChange={toggleSelectAll}
-                    className="w-4 h-4 rounded bg-zinc-700 border-zinc-600 focus:ring-primary cursor-pointer"
-                />
-                <span className="text-xs text-text-muted select-none cursor-pointer" onClick={toggleSelectAll}>تحديد الكل</span>
-            </div>
-            <div className="space-y-2">
-                {data.tests.quantitative.length > 0 ? (
-                    [...data.tests.quantitative]
-                    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
-                    .map(test => (
-                        <div 
-                            key={test.id} 
-                            onClick={() => handleTestSelect(test)}
-                            className={`bg-zinc-800 p-3 rounded-md text-sm flex justify-between items-center group cursor-pointer hover:bg-zinc-700 transition-colors ${selectedTest?.id === test.id ? 'border border-primary' : ''}`}
-                        >
-                             <div className="flex items-center gap-2 overflow-hidden">
-                                <input 
-                                    type="checkbox"
-                                    checked={selectedIds.has(test.id)}
-                                    onChange={(e) => { e.stopPropagation(); toggleSelection(test.id); }}
-                                    className="w-4 h-4 rounded bg-zinc-600 border-zinc-500 focus:ring-primary flex-shrink-0 cursor-pointer"
-                                />
-                                <span className="truncate font-bold pl-1">{test.name}</span>
+    const Sidebar = () => {
+        // Sort tests numerically
+        const sortedTests = [...data.tests.quantitative].sort((a, b) => {
+            const numA = getTestNumber(a.name);
+            const numB = getTestNumber(b.name);
+            if (numA !== numB) return numA - numB;
+            return a.name.localeCompare(b.name);
+        });
+
+        return (
+            <aside className="w-1/4 p-4 border-l border-border overflow-y-auto bg-surface/30 hidden md:block">
+                <div className="flex justify-between items-center mb-4">
+                     <h3 className="font-bold text-text-muted">الاختبارات الحالية</h3>
+                     {selectedIds.size > 0 && (
+                         <button onClick={deleteSelected} className="text-red-400 hover:text-red-300 text-xs font-bold">حذف المحدد ({selectedIds.size})</button>
+                     )}
+                </div>
+                 <div className="mb-2 flex items-center gap-2 px-3">
+                    <input 
+                        type="checkbox" 
+                        checked={data.tests.quantitative.length > 0 && selectedIds.size === data.tests.quantitative.length}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded bg-zinc-700 border-zinc-600 focus:ring-primary cursor-pointer"
+                    />
+                    <span className="text-xs text-text-muted select-none cursor-pointer" onClick={toggleSelectAll}>تحديد الكل</span>
+                </div>
+                <div className="space-y-2">
+                    {sortedTests.length > 0 ? (
+                        sortedTests.map(test => (
+                            <div 
+                                key={test.id} 
+                                onClick={() => handleTestSelect(test)}
+                                className={`bg-zinc-800 p-3 rounded-md text-sm flex justify-between items-center group cursor-pointer hover:bg-zinc-700 transition-colors ${selectedTest?.id === test.id ? 'border border-primary' : ''}`}
+                            >
+                                 <div className="flex items-center gap-2 overflow-hidden">
+                                    <input 
+                                        type="checkbox"
+                                        checked={selectedIds.has(test.id)}
+                                        onChange={(e) => { e.stopPropagation(); toggleSelection(test.id); }}
+                                        className="w-4 h-4 rounded bg-zinc-600 border-zinc-500 focus:ring-primary flex-shrink-0 cursor-pointer"
+                                    />
+                                    <span className="truncate font-bold pl-1">{test.name}</span>
+                                </div>
+                                <button onClick={(e) => { e.stopPropagation(); if(confirm('حذف الاختبار؟')) { onDeleteTest('quantitative', test.id); if(selectedTest?.id === test.id) setSelectedTest(null); } }} className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:bg-zinc-600 p-1 rounded">
+                                    <TrashIcon className="w-4 h-4"/>
+                                </button>
                             </div>
-                            <button onClick={(e) => { e.stopPropagation(); if(confirm('حذف الاختبار؟')) { onDeleteTest('quantitative', test.id); if(selectedTest?.id === test.id) setSelectedTest(null); } }} className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:bg-zinc-600 p-1 rounded">
-                                <TrashIcon className="w-4 h-4"/>
-                            </button>
-                        </div>
-                    ))
-                ) : (
-                    <p className="text-xs text-text-muted">لا توجد اختبارات.</p>
-                )}
-            </div>
-        </aside>
-    );
+                        ))
+                    ) : (
+                        <p className="text-xs text-text-muted">لا توجد اختبارات.</p>
+                    )}
+                </div>
+            </aside>
+        );
+    };
     
     // --- Render Queue Status ---
     const renderQueue = () => {

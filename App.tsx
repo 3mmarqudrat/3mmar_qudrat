@@ -456,11 +456,22 @@ const SectionView: React.FC<{
 
     const attemptsForSelectedTest = selectedTestInfo ? data.history.filter(a => a.testId === selectedTestInfo.test.id) : [];
     
+    // Helper to sort tests numerically
+    const getTestNumber = (name: string) => {
+        // Normalize Arabic numerals to English (٠-٩ -> 0-9)
+        const normalized = name.replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString());
+        const match = normalized.match(/\d+/);
+        return match ? parseInt(match[0], 10) : 0;
+    };
+    
     const renderSidebar = () => {
         if (section === 'quantitative') {
             // Sort Quantitative tests numerically
             const sortedTests = [...data.tests.quantitative].sort((a, b) => {
-                return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+                const numA = getTestNumber(a.name);
+                const numB = getTestNumber(b.name);
+                if (numA !== numB) return numA - numB;
+                return a.name.localeCompare(b.name);
             });
 
              return (
