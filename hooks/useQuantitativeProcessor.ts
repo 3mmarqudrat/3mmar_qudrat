@@ -174,14 +174,16 @@ export const useQuantitativeProcessor = (
             qCanvas.width = config.questionBox.width;
             qCanvas.height = config.questionBox.height;
             qCanvas.getContext('2d')!.putImageData(qData, 0, 0);
-            const questionImage = qCanvas.toDataURL('image/jpeg', 0.7); // Lower quality for speed/size
+            
+            // Optimization: Reduce quality to 0.5 to keep document size manageable in Firestore
+            const questionImage = qCanvas.toDataURL('image/jpeg', 0.5);
 
             const aData = ctx.getImageData(config.answerBox.x, config.answerBox.y, config.answerBox.width, config.answerBox.height);
             const aCanvas = document.createElement('canvas');
             aCanvas.width = config.answerBox.width;
             aCanvas.height = config.answerBox.height;
             aCanvas.getContext('2d')!.putImageData(aData, 0, 0);
-            const answerImage = aCanvas.toDataURL('image/jpeg', 0.7);
+            const answerImage = aCanvas.toDataURL('image/jpeg', 0.5);
 
             let detectedAnswer = await detectAnswerFromPdfText(page, config.answerBox);
             if (!detectedAnswer) {
