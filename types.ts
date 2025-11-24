@@ -8,9 +8,10 @@ export interface LoginRecord {
 
 // Fix: Add and export the User interface for authentication.
 export interface User {
+  uid?: string; // Firebase UID
   email: string;
   username: string;
-  password: string;
+  password?: string; // Optional now as Firebase handles auth
   isDeveloper?: boolean;
   registrationDate?: string; // ISO string
   loginHistory?: LoginRecord[];

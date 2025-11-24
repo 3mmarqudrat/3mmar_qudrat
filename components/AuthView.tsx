@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState } from 'react';
 import { authService, RegistrationError } from '../services/authService';
 import { BookOpenIcon, UserIcon, MailIcon, KeyIcon, EyeIcon, EyeOffIcon, CheckCircleIcon } from './Icons';
 import { User } from '../types';
@@ -45,46 +45,34 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
         setRegistrationError(null);
     }
 
-    const handleLogin = (e: React.FormEvent) => {
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoginError(null);
         setIsLoading(true);
         try {
-            const user = authService.login(loginIdentifier, loginPassword);
+            const user = await authService.login(loginIdentifier, loginPassword);
             if (user) {
                 onLoginSuccess(user, rememberMe);
-            } else {
-                setLoginError('اسم المستخدم/البريد الإلكتروني أو كلمة المرور غير صحيحة.');
             }
-        } catch (error) {
-            setLoginError('حدث خطأ غير متوقع. حاول مرة أخرى.');
+        } catch (error: any) {
+            setLoginError(error.message);
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleQuickLogin = () => {
-        if (recentUser) {
-            onLoginSuccess(recentUser, true);
-        }
-    };
-
-    const handleRegister = (e: React.FormEvent) => {
+    const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
         setRegistrationError(null);
         setRegistrationSuccess(false);
         setIsLoading(true);
         try {
-            authService.register(regUsername, regEmail, regPassword, regConfirmPassword);
+            await authService.register(regUsername, regEmail, regPassword, regConfirmPassword);
             setRegistrationSuccess(true);
             setAuthScreen('login');
             resetForms();
-        } catch (error) {
-            if (error instanceof RegistrationError) {
-                setRegistrationError(error.message);
-            } else {
-                setRegistrationError('حدث خطأ غير متوقع.');
-            }
+        } catch (error: any) {
+            setRegistrationError(error.message);
         } finally {
             setIsLoading(false);
         }
@@ -100,41 +88,19 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                 </div>
             )}
             
-            {/* Quick Login Button */}
-            {recentUser && (
-                <div className="border-b border-border pb-6 mb-4">
-                     <p className="text-text-muted text-sm mb-3 text-center">كنت مسجلاً للدخول كـ:</p>
-                     <button 
-                        type="button" 
-                        onClick={handleQuickLogin}
-                        className="w-full flex items-center justify-between p-3 rounded-lg bg-zinc-700 hover:bg-zinc-600 transition-colors border border-primary/50 group"
-                     >
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-primary/20 rounded-full">
-                                <UserIcon className="w-6 h-6 text-primary" />
-                            </div>
-                            <div className="text-right">
-                                <p className="font-bold text-white group-hover:text-primary transition-colors">{recentUser.username}</p>
-                                <p className="text-xs text-text-muted">{recentUser.email}</p>
-                            </div>
-                        </div>
-                        <span className="text-primary font-bold text-sm bg-primary/10 px-3 py-1 rounded-full">دخول سريع</span>
-                     </button>
-                </div>
-            )}
-
             <form onSubmit={handleLogin} className="space-y-4">
                  <div>
-                    <label htmlFor="identifier" className="block text-sm font-medium text-text">اسم المستخدم أو البريد الإلكتروني</label>
+                    <label htmlFor="identifier" className="block text-sm font-medium text-text">البريد الإلكتروني</label>
                     <div className="mt-1 relative">
                         <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                            <UserIcon className="h-5 w-5 text-text-muted" />
+                            <MailIcon className="h-5 w-5 text-text-muted" />
                         </div>
                         <input
                             id="identifier"
-                            type="text"
+                            type="email"
                             value={loginIdentifier}
                             onChange={(e) => setLoginIdentifier(e.target.value)}
+                            required
                             className="bg-zinc-700 text-slate-200 block w-full p-3 pr-10 border rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-1 sm:text-sm focus-ring"
                             style={{borderColor: 'var(--color-border)'}}
                         />
@@ -161,19 +127,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                     </div>
                 </div>
                 {loginError && <p className="text-sm text-center" style={{color: 'var(--color-danger)'}}>{loginError}</p>}
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                        <input
-                            id="remember-me"
-                            type="checkbox"
-                            checked={rememberMe}
-                            onChange={(e) => setRememberMe(e.target.checked)}
-                            className="h-4 w-4 rounded focus:ring-primary focus-ring bg-zinc-600"
-                            style={{borderColor: 'var(--color-border)', color: 'var(--color-primary)'}}
-                        />
-                        <label htmlFor="remember-me" className="mr-2 block text-sm text-text">تذكرني</label>
-                    </div>
-                </div>
+                
                 <div>
                     <button type="submit" disabled={isLoading || (!loginIdentifier && !loginPassword)} 
                     style={{backgroundColor: 'var(--color-accent)'}}

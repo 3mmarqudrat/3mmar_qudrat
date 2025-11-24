@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.22.0",
+    "firebase": "^10.12.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "pdfjs-dist": "^3.11.174"

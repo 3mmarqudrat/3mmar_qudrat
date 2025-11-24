@@ -1,7 +1,16 @@
 
+import { 
+    signInWithEmailAndPassword, 
+    createUserWithEmailAndPassword, 
+    signOut, 
+    onAuthStateChanged, 
+    User as FirebaseUser,
+    updateProfile
+} from 'firebase/auth';
+import { doc, setDoc, getDoc, updateDoc, arrayUnion, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { auth, db } from './firebase';
 import { User, LoginRecord } from '../types';
 
-// Custom error for registration-specific issues
 export class RegistrationError extends Error {
   constructor(message: string) {
     super(message);
@@ -9,195 +18,116 @@ export class RegistrationError extends Error {
   }
 }
 
-const USERS_KEY = 'qudratUsers';
-const CURRENT_USER_KEY = 'currentUser';
-
-// Users are now stored with a composite key "email|username"
-const _getUsers = (): { [compositeKey: string]: User } => {
-    try {
-        const users = localStorage.getItem(USERS_KEY);
-        return users ? JSON.parse(users) : {};
-    } catch (e) {
-        return {};
-    }
-};
-
-const saveUsers = (users: { [compositeKey: string]: User }) => {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-};
-
+// Map Firebase User to App User
+const mapUser = (fbUser: FirebaseUser, additionalData?: any): User => ({
+    uid: fbUser.uid,
+    email: fbUser.email || '',
+    username: additionalData?.username || fbUser.displayName || 'User',
+    isDeveloper: additionalData?.isDeveloper || false,
+    registrationDate: fbUser.metadata.creationTime,
+    loginHistory: additionalData?.loginHistory || []
+});
 
 export const authService = {
-    login: (identifier: string, password: string): User | null => {
-        // Handle developer login
-        if (identifier.trim() === '' && password === '...') {
-            const users = _getUsers();
-            const devUser = Object.values(users).find(u => u.isDeveloper);
-            if (devUser) return devUser; // Login successful
+    login: async (email: string, password: string): Promise<User> => {
+        try {
+            const cred = await signInWithEmailAndPassword(auth, email, password);
+            const userDoc = await getDoc(doc(db, 'users', cred.user.uid));
+            
+            // Track Login
+            await updateDoc(doc(db, 'users', cred.user.uid), {
+                loginHistory: arrayUnion({
+                    loginTime: new Date().toISOString(),
+                    logoutTime: null
+                } as LoginRecord)
+            });
+
+            return mapUser(cred.user, userDoc.data());
+        } catch (error: any) {
+            console.error("Login Error:", error);
+            throw new Error(error.code === 'auth/invalid-credential' ? 'بيانات الدخول غير صحيحة' : 'حدث خطأ في تسجيل الدخول');
         }
-        
-        const users = _getUsers();
-        const allUsers = Object.values(users);
-        
-        const candidateUsers = allUsers.filter(
-            u => !u.isDeveloper && (u.email === identifier || u.username === identifier)
-        );
-
-        const user = candidateUsers.find(u => u.password === password);
-
-        return user || null;
     },
 
-    loginAsDev: (): User => {
-        const users = _getUsers();
-        let devUser = Object.values(users).find(u => u.isDeveloper);
-        
-        if (!devUser) {
-             devUser = {
-                email: 'dev@local.host',
-                username: 'مطور',
-                password: '...',
-                isDeveloper: true,
-                registrationDate: new Date().toISOString(),
-                loginHistory: []
-             };
-             const compositeKey = `${devUser.email}|${devUser.username}`;
-             users[compositeKey] = devUser;
-             saveUsers(users);
-        }
-        return devUser;
-    },
-
-    register: (username: string, email: string, password: string, confirmPassword: string) => {
-        const users = _getUsers();
-        const allUsers = Object.values(users);
-
-        // Developer Registration
-        if (username.trim() === '' && email.trim() !== '' && password === '...' && confirmPassword === '....') {
-            const devEmailInUse = allUsers.some(u => u.email === email && u.isDeveloper);
-            if(devEmailInUse) {
-                throw new RegistrationError('حساب مطور بهذا البريد الإلكتروني موجود بالفعل.');
-            }
-            const newDevUser: User = { 
-                email, 
-                username: 'مطور', // Developer username
-                password: '...', // Store the login password
-                isDeveloper: true,
-                registrationDate: new Date().toISOString(),
-                loginHistory: []
-            };
-            const compositeKey = `${email}|${newDevUser.username}`; // Use a unique username
-            users[compositeKey] = newDevUser;
-            saveUsers(users);
-            return;
-        }
-
-        // Regular User Registration
+    register: async (username: string, email: string, password: string, confirmPassword: string): Promise<User> => {
         if (!username.trim() || !email.trim() || !password || !confirmPassword) {
             throw new RegistrationError('جميع الحقول مطلوبة.');
         }
         if (password !== confirmPassword) {
              throw new RegistrationError('كلمتا المرور غير متطابقتين.');
         }
-        if (password.length < 3) { // Simplified for testing
-            throw new RegistrationError('يجب أن تتكون كلمة المرور من 3 أحرف على الأقل.');
-        }
-        if (email === 'guest@local.session' || email === 'temp-dev@local.session') {
-            throw new RegistrationError('هذا البريد الإلكتروني محجوز.');
+        if (password.length < 6) { 
+            throw new RegistrationError('يجب أن تتكون كلمة المرور من 6 أحرف على الأقل.');
         }
 
-        const emailInUse = allUsers.some(u => u.email === email && !u.isDeveloper);
-        if (emailInUse) {
-            throw new RegistrationError('هذا البريد الإلكتروني مسجل بالفعل لمستخدم آخر.');
-        }
-
-        const usernameInUse = allUsers.some(u => u.username === username && !u.isDeveloper);
-        if (usernameInUse) {
-            throw new RegistrationError('اسم المستخدم هذا مستخدم بالفعل.');
-        }
-        
-        const newUser: User = { 
-            email, 
-            username, 
-            password,
-            isDeveloper: false,
-            registrationDate: new Date().toISOString(),
-            loginHistory: []
-        };
-        const compositeKey = `${email}|${username}`;
-        users[compositeKey] = newUser;
-        saveUsers(users);
-    },
-    
-    trackLogin: (userKey: string) => {
-        const users = _getUsers();
-        if (users[userKey]) {
-            if (!users[userKey].loginHistory) {
-                users[userKey].loginHistory = [];
-            }
-            const newRecord: LoginRecord = {
-                loginTime: new Date().toISOString(),
-                logoutTime: null,
-            };
-            users[userKey].loginHistory!.push(newRecord);
-            saveUsers(users);
-        }
-    },
-
-    trackLogout: (userKey: string) => {
-        const users = _getUsers();
-        if (users[userKey] && users[userKey].loginHistory) {
-            const history = users[userKey].loginHistory!;
-            const lastActiveSession = history.slice().reverse().find(session => session.logoutTime === null);
-            if (lastActiveSession) {
-                lastActiveSession.logoutTime = new Date().toISOString();
-                saveUsers(users);
-            }
-        }
-    },
-
-    logout: () => {
-        localStorage.removeItem(CURRENT_USER_KEY);
-    },
-
-    getCurrentUser: (): string | null => {
-        return localStorage.getItem(CURRENT_USER_KEY);
-    },
-
-    setCurrentUser: (compositeKey: string) => {
-        localStorage.setItem(CURRENT_USER_KEY, compositeKey);
-    },
-
-    getUser: (compositeKey: string): User | null => {
-        if (!compositeKey) return null;
-        if (compositeKey.startsWith('guest|')) {
-            return {
-                email: 'guest@local.session',
-                username: 'زائر',
-                password: '',
+        try {
+            const cred = await createUserWithEmailAndPassword(auth, email, password);
+            await updateProfile(cred.user, { displayName: username });
+            
+            const newUser = {
+                username,
+                email,
                 isDeveloper: false,
+                registrationDate: new Date().toISOString(),
+                loginHistory: []
             };
+            
+            await setDoc(doc(db, 'users', cred.user.uid), newUser);
+            return mapUser(cred.user, newUser);
+        } catch (error: any) {
+            console.error("Registration Error:", error);
+            if (error.code === 'auth/email-already-in-use') {
+                throw new RegistrationError('البريد الإلكتروني مسجل بالفعل.');
+            }
+            throw new RegistrationError('حدث خطأ أثناء إنشاء الحساب.');
         }
-        const users = _getUsers();
-        return users[compositeKey] || null;
     },
     
-    getAllUsers: (): { key: string, user: User }[] => {
-        const users = _getUsers();
-        return Object.entries(users).map(([key, user]) => ({ key, user }));
+    logout: async () => {
+        await signOut(auth);
     },
 
-    isDevUser: (compositeKey: string | null): boolean => {
-        if (!compositeKey) return false;
-        const user = authService.getUser(compositeKey);
-        return !!user?.isDeveloper;
+    onAuthStateChanged: (callback: (user: User | null) => void) => {
+        return onAuthStateChanged(auth, async (fbUser) => {
+            if (fbUser) {
+                 try {
+                     const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
+                     if (userDoc.exists()) {
+                         callback(mapUser(fbUser, userDoc.data()));
+                     } else {
+                         // Fallback if user doc missing
+                         callback(mapUser(fbUser, { username: fbUser.displayName }));
+                     }
+                 } catch (e) {
+                     console.error("Error fetching user data", e);
+                     callback(null);
+                 }
+            } else {
+                callback(null);
+            }
+        });
+    },
+    
+    // Fetch users from Firestore for Admin View
+    getAllUsers: async (): Promise<{ key: string, user: User }[]> => {
+        try {
+            const querySnapshot = await getDocs(collection(db, 'users'));
+            return querySnapshot.docs.map(docSnap => ({
+                key: docSnap.id,
+                user: { uid: docSnap.id, ...docSnap.data() } as User
+            }));
+        } catch (e) {
+            console.error("Error getting users", e);
+            return [];
+        }
     },
 
-    deleteUser: (userKey: string) => {
-        const users = _getUsers();
-        if (users[userKey]) {
-            delete users[userKey];
-            saveUsers(users);
+    // Delete user profile from Firestore
+    deleteUser: async (userKey: string) => {
+        try {
+            await deleteDoc(doc(db, 'users', userKey));
+        } catch(e) { 
+            console.error("Error deleting user profile:", e); 
         }
     },
 };

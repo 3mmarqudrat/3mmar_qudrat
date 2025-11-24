@@ -1,11 +1,8 @@
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { AppData, Test, Section, Question, TestAttempt, Folder, VerbalTests, VERBAL_BANKS, VERBAL_CATEGORIES, FolderQuestion } from '../types';
-import { authService } from '../services/authService';
-import { storageService } from '../services/storageService';
-
-const DEV_TESTS_USER_ID = 'developer-tests-data';
-const STORAGE_KEY = 'qudratUsersData';
+import { db } from '../services/firebase';
+import { doc, getDoc, setDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 
 const initialVerbalTests: VerbalTests = Object.keys(VERBAL_BANKS).reduce((acc, bankKey) => {
   acc[bankKey] = Object.keys(VERBAL_CATEGORIES).reduce((catAcc, catKey) => {
@@ -15,25 +12,10 @@ const initialVerbalTests: VerbalTests = Object.keys(VERBAL_BANKS).reduce((acc, b
   return acc;
 }, {} as VerbalTests);
 
-const sampleTest: Test = {
-    id: 'sample_test_1',
-    name: 'اختبار تجريبي 1',
-    questions: [
-        { id: 'q_sample_1', questionText: 'ليل : نهار', options: ['شمس : قمر', 'صيف : ربيع', 'دفتر : قلم', 'سيارة : شارع'], correctAnswer: 'شمس : قمر' },
-        { id: 'q_sample_2', questionText: 'مستشفى : مرضى', options: ['مدرسة : طلاب', 'ملعب : كرة', 'حديقة : أشجار', 'بيت : أسرة'], correctAnswer: 'مدرسة : طلاب' },
-    ]
-};
-
 export const getInitialData = (): AppData => ({
   tests: {
     quantitative: [],
-    verbal: {
-        ...JSON.parse(JSON.stringify(initialVerbalTests)),
-        'bank1': {
-            ...JSON.parse(JSON.stringify(initialVerbalTests['bank1'])),
-            'verbalAnalogy': [sampleTest]
-        }
-    },
+    verbal: initialVerbalTests,
   },
   folders: {
     quantitative: [{ id: 'mistakes_quantitative', name: 'مجلد الأخطاء', questions: [] }],
@@ -47,141 +29,103 @@ export const getInitialData = (): AppData => ({
   reviewedQuestionIds: {},
 });
 
-export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewMode: boolean) => {
-  const [allUsersData, setAllUsersData] = useState<{ [key: string]: AppData }>({});
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Load data from IndexedDB (with migration from localStorage if needed)
-  useEffect(() => {
-    const loadData = async () => {
-        setIsLoading(true);
-        try {
-            // 1. Try IndexedDB
-            let data = await storageService.getItem<{ [key: string]: AppData }>(STORAGE_KEY);
-            
-            // 2. Migration: If empty in IDB, check LocalStorage
-            if (!data || Object.keys(data).length === 0) {
-                const lsItem = window.localStorage.getItem(STORAGE_KEY);
-                if (lsItem) {
-                    try {
-                        console.log("Migrating data from LocalStorage to IndexedDB...");
-                        data = JSON.parse(lsItem);
-                        // Save to IDB
-                        await storageService.setItem(STORAGE_KEY, data);
-                        // Clear LocalStorage to free up space/avoid quota errors
-                        window.localStorage.removeItem(STORAGE_KEY);
-                    } catch (e) {
-                        console.error("Migration failed:", e);
-                    }
-                }
-            }
-            
-            // 3. Ensure dev structure exists
-            if (!data) data = {};
-            if (!data[DEV_TESTS_USER_ID]) {
-                data[DEV_TESTS_USER_ID] = getInitialData();
-            }
-
-            setAllUsersData(data);
-        } catch (error) {
-            console.error("Failed to load user data", error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    loadData();
-
-    const handleDataUpdate = () => {
-        // Reload from DB if another tab/component updated it
-        loadData();
-    };
-    
-    window.addEventListener('qudratDataUpdated', handleDataUpdate);
-    
-    return () => {
-        window.removeEventListener('qudratDataUpdated', handleDataUpdate);
-    };
-  }, []);
-
-  const saveAllUsersData = async (newData: { [key: string]: AppData }) => {
-      try {
-          await storageService.setItem(STORAGE_KEY, newData);
-          window.dispatchEvent(new Event('qudratDataUpdated'));
-      } catch (error) {
-          console.error("Failed to save user data to IndexedDB", error);
-      }
-  };
-
-  const data: AppData = useMemo(() => {
-    const activeUserId = userId;
-    if (!activeUserId) return getInitialData();
-    
-    const userDataFromStorage = allUsersData[activeUserId];
-    const initialData = getInitialData();
-    const userData = {
-        ...initialData,
-        ...userDataFromStorage,
-        reviewTests: userDataFromStorage?.reviewTests || initialData.reviewTests,
-        reviewedQuestionIds: userDataFromStorage?.reviewedQuestionIds || initialData.reviewedQuestionIds
-    };
-    const devTestsData = allUsersData[DEV_TESTS_USER_ID] || getInitialData();
+// Helper to deep merge initial data structure with loaded data to ensure no undefined errors
+const mergeWithInitial = (loadedData: any): AppData => {
+    const initial = getInitialData();
+    if (!loadedData) return initial;
 
     return {
-      tests: devTestsData.tests,
-      folders: userData.folders,
-      history: userData.history,
-      reviewTests: userData.reviewTests,
-      reviewedQuestionIds: userData.reviewedQuestionIds,
+        tests: {
+            quantitative: loadedData.tests?.quantitative || [],
+            verbal: { ...initial.tests.verbal, ...(loadedData.tests?.verbal || {}) }
+        },
+        folders: {
+            quantitative: loadedData.folders?.quantitative || initial.folders.quantitative,
+            verbal: loadedData.folders?.verbal || initial.folders.verbal
+        },
+        history: loadedData.history || [],
+        reviewTests: {
+            quantitative: loadedData.reviewTests?.quantitative || [],
+            verbal: loadedData.reviewTests?.verbal || []
+        },
+        reviewedQuestionIds: loadedData.reviewedQuestionIds || {}
     };
-  }, [userId, allUsersData]);
+};
+
+export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewMode: boolean) => {
+  const [data, setData] = useState<AppData>(getInitialData());
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Use a ref to track if we should save updates (avoid saving initial load)
+  const isLoadedRef = useRef(false);
+
+  // Load Data from Firestore
+  useEffect(() => {
+    if (!userId) {
+        setData(getInitialData());
+        setIsLoading(false);
+        return;
+    }
+
+    setIsLoading(true);
+    isLoadedRef.current = false;
+
+    // Real-time listener
+    const docRef = doc(db, 'userData', userId);
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+        if (docSnap.exists()) {
+            const loadedData = docSnap.data() as AppData;
+            setData(mergeWithInitial(loadedData));
+        } else {
+            // New user, init data
+            setData(getInitialData());
+        }
+        setIsLoading(false);
+        // After first load, enable saving
+        setTimeout(() => { isLoadedRef.current = true; }, 500);
+    }, (error) => {
+        console.error("Error loading user data:", error);
+        setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [userId]);
+
+  // Save Data to Firestore (Debounced)
+  const saveDataToFirestore = async (newData: AppData) => {
+      if (!userId || !isLoadedRef.current) return;
+      try {
+          await setDoc(doc(db, 'userData', userId), newData);
+      } catch (e) {
+          console.error("Failed to save data to Firestore:", e);
+      }
+  };
 
   const updateCurrentUserData = (updater: (draft: AppData) => void) => {
-    const activeUserId = userId;
-    if (!activeUserId) return;
-    setAllUsersData(prevAll => {
-      const newAll = { ...prevAll };
-      const userDraft = JSON.parse(JSON.stringify(newAll[activeUserId] || getInitialData()));
-      updater(userDraft);
-      newAll[activeUserId] = userDraft;
-      // Fire and forget save (optimistic UI update)
-      saveAllUsersData(newAll);
-      return newAll;
+    if (!userId) return;
+    setData(prevData => {
+      const newData = JSON.parse(JSON.stringify(prevData));
+      updater(newData);
+      saveDataToFirestore(newData); // Fire and forget
+      return newData;
     });
   };
 
-  const updateDevTestsData = (updater: (draft: AppData) => void) => {
-    if (!isDevUser) return;
-    setAllUsersData(prevAll => {
-      const newAll = { ...prevAll };
-      const devDraft = JSON.parse(JSON.stringify(newAll[DEV_TESTS_USER_ID] || getInitialData()));
-      updater(devDraft);
-      newAll[DEV_TESTS_USER_ID] = devDraft;
-      saveAllUsersData(newAll);
-      return newAll;
-    });
-  };
-  
-  const deleteUserData = (userKey: string) => {
-    setAllUsersData(prevAll => {
-      const newAll = { ...prevAll };
-      if (newAll[userKey]) {
-        delete newAll[userKey];
-        saveAllUsersData(newAll);
-      }
-      return newAll;
-    });
-  };
+  // --- Actions ---
 
   const addTest = (section: Section, testName: string, bankKey?: string, categoryKey?: string, sourceText?: string) => {
+    // Only dev user can add tests, usually. 
+    // Assuming for now simple logic: direct update to current user data (which acts as dev if isDevUser)
     if (!isDevUser) return '';
+    
     const newTest: Test = {
       id: `test_${Date.now()}`,
       name: testName,
       questions: [],
       sourceText,
     };
-    updateDevTestsData(draft => {
+    
+    updateCurrentUserData(draft => {
         if (section === 'verbal' && bankKey && categoryKey) {
             if (!draft.tests.verbal[bankKey]) draft.tests.verbal[bankKey] = {};
             if (!draft.tests.verbal[bankKey][categoryKey]) draft.tests.verbal[bankKey][categoryKey] = [];
@@ -197,7 +141,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     if (!isDevUser) return;
     const questionsWithIds: Question[] = newQuestions.map(q => ({ ...q, id: `q_${Date.now()}_${Math.random()}` }));
     
-    updateDevTestsData(draft => {
+    updateCurrentUserData(draft => {
         if (section === 'verbal' && bankKey && categoryKey) {
             if (draft.tests.verbal[bankKey] && draft.tests.verbal[bankKey][categoryKey]) {
                 const testIndex = draft.tests.verbal[bankKey][categoryKey].findIndex((t: Test) => t.id === testId);
@@ -216,7 +160,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
   
   const updateQuestionAnswer = (section: Section, testId: string, questionId: string, newAnswer: string, bankKey?: string, categoryKey?: string) => {
       if (!isDevUser) return;
-      updateDevTestsData(draft => {
+      updateCurrentUserData(draft => {
           if (section === 'verbal' && bankKey && categoryKey) {
               const test = draft.tests.verbal[bankKey]?.[categoryKey]?.find((t: Test) => t.id === testId);
               if (test) {
@@ -235,7 +179,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
   
   const deleteTest = (section: Section, testId: string, bankKey?: string, categoryKey?: string) => {
     if (!isDevUser) return;
-    updateDevTestsData(draft => {
+    updateCurrentUserData(draft => {
       if (section === 'verbal' && bankKey && categoryKey) {
          if (draft.tests.verbal[bankKey] && draft.tests.verbal[bankKey][categoryKey]) {
             draft.tests.verbal[bankKey][categoryKey] = draft.tests.verbal[bankKey][categoryKey].filter((t: Test) => t.id !== testId);
@@ -248,7 +192,7 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
   
   const deleteTests = (section: Section, testIds: string[], bankKey?: string, categoryKey?: string) => {
     if (!isDevUser) return;
-    updateDevTestsData(draft => {
+    updateCurrentUserData(draft => {
       if (section === 'verbal' && bankKey && categoryKey) {
          if (draft.tests.verbal[bankKey] && draft.tests.verbal[bankKey][categoryKey]) {
             draft.tests.verbal[bankKey][categoryKey] = draft.tests.verbal[bankKey][categoryKey].filter((t: Test) => !testIds.includes(t.id));
@@ -413,11 +357,21 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
         };
         addQuestionsToReview(section, [questionToAdd]);
     };
+    
+    // Updated: Delete user data (tests, history)
+    const deleteUserData = async (userKey?: string) => {
+        if (!userKey) return;
+        try {
+            await deleteDoc(doc(db, 'userData', userKey));
+        } catch (e) {
+            console.error("Failed to delete user data:", e);
+        }
+    };
 
-  // Export Data Logic
   const exportAllData = () => {
+      // Logic would be similar, but strictly from current data
       try {
-          const dataStr = JSON.stringify(allUsersData);
+          const dataStr = JSON.stringify(data);
           const blob = new Blob([dataStr], { type: "application/json" });
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
@@ -435,26 +389,20 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
       }
   };
 
-  // Import Data Logic
-  const importAllData = (file: File): Promise<boolean> => {
+  const importAllData = async (file: File): Promise<boolean> => {
       return new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = async (e) => {
               const text = e.target?.result as string;
               try {
-                  const data = JSON.parse(text);
-                  // Basic validation
-                  if (typeof data !== 'object') throw new Error("Invalid data format");
-                  
-                  await saveAllUsersData(data);
-                  setAllUsersData(data);
+                  const importedData = JSON.parse(text);
+                  await saveDataToFirestore(importedData);
+                  setData(importedData);
                   resolve(true);
               } catch (err) {
-                  console.error("Import failed", err);
                   reject(err);
               }
           };
-          reader.onerror = () => reject(new Error("File read error"));
           reader.readAsText(file);
       });
   };

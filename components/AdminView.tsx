@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+
+import React, { useState, useMemo, useEffect } from 'react';
 import { authService } from '../services/authService';
 import { User } from '../types';
 import { ArrowRightIcon, TrashIcon, EyeIcon, UserIcon, MailIcon, KeyIcon } from './Icons';
@@ -10,9 +11,13 @@ interface AdminViewProps {
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({ onBack, onPreviewUser, onDeleteUser }) => {
-    const [users, setUsers] = useState(() => authService.getAllUsers());
+    const [users, setUsers] = useState<{ key: string, user: User }[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<{key: string, user: User} | null>(null);
+
+    useEffect(() => {
+        authService.getAllUsers().then(setUsers);
+    }, []);
 
     const filteredUsers = useMemo(() => {
         if (!searchTerm) return users.filter(u => !u.user.isDeveloper);
@@ -24,9 +29,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ onBack, onPreviewUser, onD
         );
     }, [users, searchTerm]);
 
-    const handleDelete = (userKey: string) => {
+    const handleDelete = async (userKey: string) => {
         onDeleteUser(userKey);
-        setUsers(authService.getAllUsers());
+        // Optimistic update or refetch
+        const updatedUsers = await authService.getAllUsers();
+        setUsers(updatedUsers);
         setShowDeleteConfirm(null);
     };
 
