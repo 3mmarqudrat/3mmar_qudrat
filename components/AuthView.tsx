@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { authService, RegistrationError } from '../services/authService';
-import { BookOpenIcon, UserIcon, MailIcon, KeyIcon, EyeIcon, EyeOffIcon, CheckCircleIcon } from './Icons';
+import { BookOpenIcon, UserIcon, MailIcon, KeyIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, UploadCloudIcon } from './Icons';
 import { User } from '../types';
 
 type AuthScreen = 'login' | 'register';
@@ -112,10 +112,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                         </div>
                         <input
                             id="identifier"
-                            type="text" /* Changed from email to text to allow empty without browser validation error */
+                            type="text" 
                             value={loginIdentifier}
                             onChange={(e) => setLoginIdentifier(e.target.value)}
-                            /* Removed required to allow empty submission for secret backdoor */
                             className="bg-zinc-700 text-slate-200 block w-full p-3 pr-10 border rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-1 sm:text-sm focus-ring"
                             style={{borderColor: 'var(--color-border)'}}
                         />
@@ -135,7 +134,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                             type={showLoginPassword ? 'text' : 'password'}
                             value={loginPassword}
                             onChange={(e) => setLoginPassword(e.target.value)}
-                            /* Removed required */
                             className="bg-zinc-700 text-slate-200 block w-full p-3 pr-10 border rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-1 sm:text-sm focus-ring"
                             style={{borderColor: 'var(--color-border)'}}
                         />
@@ -233,8 +231,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                 </div>
             </div>
 
-            {/* Developer Code field removed as requested */}
-
             {registrationError && <p className="text-sm text-center" style={{color: 'var(--color-danger)'}}>{registrationError}</p>}
             
             <div className="pt-2">
@@ -263,6 +259,10 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
                 <h2 className="mt-6 text-center text-3xl font-bold text-text">
                     {titles[authScreen]}
                 </h2>
+                <div className="flex items-center justify-center gap-2 mt-2 text-green-400 text-xs font-bold bg-green-900/20 py-1 px-3 rounded-full w-fit mx-auto border border-green-900">
+                    <UploadCloudIcon className="w-3 h-3" />
+                    v2.0 (Cloud Connected)
+                </div>
             </div>
             <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
                 <div className="bg-surface py-8 px-4 shadow-2xl sm:rounded-xl sm:px-10 border" style={{borderColor: 'var(--color-border)'}}>

