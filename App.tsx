@@ -336,7 +336,7 @@ const HomeView: React.FC<{
                                 title="إدارة الموقع"
                                 icon={<SettingsIcon className="w-16 h-16 text-primary mx-auto"/>}
                                 onClick={onGoToSiteManagement}
-                                description="تفعيل أو إلغاء تفعيل الأقسام."
+                                description="تفعيل أو إلغاء تفعيل الأقسام، إدارة البيانات."
                             />
                             <SectionCard 
                                 title="إدارة القسم اللفظي" 
@@ -456,7 +456,7 @@ const SectionView: React.FC<{
 
     const attemptsForSelectedTest = selectedTestInfo ? data.history.filter(a => a.testId === selectedTestInfo.test.id) : [];
     
-    // Helper to sort tests numerically
+    // Helper to sort tests numerically (1, 2, 10 instead of 1, 10, 2)
     const getTestNumber = (name: string) => {
         // Normalize Arabic numerals to English (٠-٩ -> 0-9)
         const normalized = name.replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString());
@@ -475,7 +475,7 @@ const SectionView: React.FC<{
             });
 
              return (
-                <nav className="space-y-3">
+                <nav className="space-y-3 p-4">
                     <h2 className="text-lg font-bold text-text-muted px-2 mb-4">الاختبارات ({sortedTests.length})</h2>
                     <div className="space-y-2">
                         {sortedTests.length > 0 ? (
@@ -516,7 +516,7 @@ const SectionView: React.FC<{
         0);
         
         return (
-             <nav className="space-y-2">
+             <nav className="space-y-2 p-4">
                 <h2 className="text-lg font-bold text-text-muted px-2 mb-2">البنوك ({totalTestsCount})</h2>
                 {Object.entries(VERBAL_BANKS).map(([bankKey, bankName]) => {
                     const bankData = verbalTests[bankKey] || {};
@@ -582,89 +582,90 @@ const SectionView: React.FC<{
     };
 
     return (
-        <div className="bg-bg min-h-screen flex flex-col">
+        <div className="bg-bg h-screen flex flex-col overflow-hidden">
             <Header title={`التدريب - ${section === 'quantitative' ? 'القسم الكمي' : 'القسم اللفظي'}`} leftSlot={headerLeftSlot} rightSlot={headerRightSlot} />
-            {/* Mobile: Stack vertical. Desktop: Row. No fixed height to allow scrolling */}
-            <div className="container mx-auto flex flex-col md:flex-row flex-grow">
-                {/* Sidebar - Mobile Order 1 */}
-                <aside className="w-full md:w-1/3 lg:w-1/4 p-4 border-b md:border-b-0 md:border-l border-border md:max-h-none overflow-y-auto">
+            {/* Fixed height container for independent scrolling */}
+            <div className="container mx-auto flex flex-col md:flex-row flex-grow overflow-hidden h-full">
+                {/* Sidebar */}
+                <aside className="w-full md:w-1/3 lg:w-1/4 border-b md:border-b-0 md:border-l border-border overflow-y-auto custom-scrollbar h-full">
                    {renderSidebar()}
                 </aside>
-                {/* Main Content - Mobile Order 2 */}
-                <main className="w-full md:w-2/3 lg:w-3/4 p-4 md:p-6 flex flex-col">
-                    {/* Ensure this container grows to fill available space */}
-                    <div className="bg-surface rounded-lg p-4 md:p-6 border border-border flex-grow flex flex-col">
-                        {selectedTestInfo ? (
-                            <div className="flex-grow flex flex-col">
-                                <h3 className="text-3xl font-bold text-primary mb-2">{selectedTestInfo.test.name}</h3>
-                                {section === 'verbal' && (
-                                    <p className="text-md text-text-muted mb-6">{VERBAL_BANKS[selectedTestInfo.bankKey!]} - {VERBAL_CATEGORIES[selectedTestInfo.categoryKey!]}</p>
-                                )}
-                                {section === 'quantitative' && (
-                                    <p className="text-md text-text-muted mb-6">القسم الكمي</p>
-                                )}
-                                <div className="bg-zinc-900/50 p-4 rounded-lg mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-                                    <p className="text-lg">عدد الأسئلة: <span className="font-bold text-xl">{selectedTestInfo.test.questions.length}</span></p>
-                                    <button 
-                                        onClick={() => onStartTest(selectedTestInfo.test, selectedTestInfo.bankKey, selectedTestInfo.categoryKey)}
-                                        className="w-full sm:w-auto px-8 py-3 bg-accent border-2 border-accent text-white font-bold rounded-lg hover:opacity-90 transition-opacity text-lg transform transition-transform hover:scale-105"
-                                    >
-                                        بدء الاختبار
-                                    </button>
-                                </div>
+                {/* Main Content */}
+                <main className="w-full md:w-2/3 lg:w-3/4 overflow-y-auto custom-scrollbar h-full">
+                    <div className="p-4 md:p-6 min-h-full flex flex-col">
+                        <div className="bg-surface rounded-lg p-4 md:p-6 border border-border flex-grow flex flex-col">
+                            {selectedTestInfo ? (
+                                <div className="flex-grow flex flex-col">
+                                    <h3 className="text-3xl font-bold text-primary mb-2">{selectedTestInfo.test.name}</h3>
+                                    {section === 'verbal' && (
+                                        <p className="text-md text-text-muted mb-6">{VERBAL_BANKS[selectedTestInfo.bankKey!]} - {VERBAL_CATEGORIES[selectedTestInfo.categoryKey!]}</p>
+                                    )}
+                                    {section === 'quantitative' && (
+                                        <p className="text-md text-text-muted mb-6">القسم الكمي</p>
+                                    )}
+                                    <div className="bg-zinc-900/50 p-4 rounded-lg mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                                        <p className="text-lg">عدد الأسئلة: <span className="font-bold text-xl">{selectedTestInfo.test.questions.length}</span></p>
+                                        <button 
+                                            onClick={() => onStartTest(selectedTestInfo.test, selectedTestInfo.bankKey, selectedTestInfo.categoryKey)}
+                                            className="w-full sm:w-auto px-8 py-3 bg-accent border-2 border-accent text-white font-bold rounded-lg hover:opacity-90 transition-opacity text-lg transform transition-transform hover:scale-105"
+                                        >
+                                            بدء الاختبار
+                                        </button>
+                                    </div>
 
-                                <div className="flex justify-between items-center mt-8 mb-4 border-b border-border pb-2">
-                                    <h4 className="text-xl font-bold">سجل المحاولات</h4>
-                                    <span className="text-sm font-bold text-text-muted bg-zinc-700 px-3 py-1 rounded-full">{toArabic(attemptsForSelectedTest.length)} محاولات</span>
-                                </div>
-                                {attemptsForSelectedTest.length > 0 ? (
-                                    // Use grow to let it expand naturally
-                                    <div className="space-y-4 flex-grow">
-                                        {attemptsForSelectedTest.map(attempt => {
-                                            const answeredCount = attempt.answers.filter(a => a.answer).length;
-                                            const unanswered = attempt.totalQuestions - answeredCount;
-                                            const incorrect = answeredCount - attempt.score;
-                                            const percentage = Math.round((attempt.score / attempt.totalQuestions) * 100);
-                                            const { dayName, hijriDate, gregDate, time } = formatDateParts(attempt.date);
+                                    <div className="flex justify-between items-center mt-8 mb-4 border-b border-border pb-2">
+                                        <h4 className="text-xl font-bold">سجل المحاولات</h4>
+                                        <span className="text-sm font-bold text-text-muted bg-zinc-700 px-3 py-1 rounded-full">{toArabic(attemptsForSelectedTest.length)} محاولات</span>
+                                    </div>
+                                    {attemptsForSelectedTest.length > 0 ? (
+                                        // Use grow to let it expand naturally
+                                        <div className="space-y-4 flex-grow">
+                                            {attemptsForSelectedTest.map(attempt => {
+                                                const answeredCount = attempt.answers.filter(a => a.answer).length;
+                                                const unanswered = attempt.totalQuestions - answeredCount;
+                                                const incorrect = answeredCount - attempt.score;
+                                                const percentage = Math.round((attempt.score / attempt.totalQuestions) * 100);
+                                                const { dayName, hijriDate, gregDate, time } = formatDateParts(attempt.date);
 
-                                            return (
-                                                <div key={attempt.id} onClick={() => onReviewAttempt(attempt)} className="p-4 bg-zinc-800 rounded-lg border border-border hover:border-primary cursor-pointer transition-colors">
-                                                    {/* Top Row: Date Info Distributed evenly across full width */}
-                                                    <div className="flex justify-between items-center border-b border-zinc-700 pb-3 mb-3 w-full text-lg font-bold text-zinc-300" dir="rtl">
-                                                        <span>{dayName}</span>
-                                                        <span>{hijriDate}</span>
-                                                        <span>{gregDate}</span>
-                                                        <span className="text-sky-400" dir="ltr">{time}</span>
-                                                    </div>
+                                                return (
+                                                    <div key={attempt.id} onClick={() => onReviewAttempt(attempt)} className="p-4 bg-zinc-800 rounded-lg border border-border hover:border-primary cursor-pointer transition-colors">
+                                                        {/* Top Row: Date Info Distributed evenly across full width */}
+                                                        <div className="flex justify-between items-center border-b border-zinc-700 pb-3 mb-3 w-full text-lg font-bold text-zinc-300" dir="rtl">
+                                                            <span>{dayName}</span>
+                                                            <span>{hijriDate}</span>
+                                                            <span>{gregDate}</span>
+                                                            <span className="text-sky-400" dir="ltr">{time}</span>
+                                                        </div>
 
-                                                    <div className="flex justify-between items-center mb-2">
-                                                        <div className="text-center">
-                                                            <p className={`font-bold text-3xl ${percentage >= 50 ? 'text-green-400' : 'text-red-400'}`}>{toArabic(percentage)}%</p>
-                                                            <span className="text-sm text-text-muted">({toArabic(attempt.score)}/{toArabic(attempt.totalQuestions)})</span>
+                                                        <div className="flex justify-between items-center mb-2">
+                                                            <div className="text-center">
+                                                                <p className={`font-bold text-3xl ${percentage >= 50 ? 'text-green-400' : 'text-red-400'}`}>{toArabic(percentage)}%</p>
+                                                                <span className="text-sm text-text-muted">({toArabic(attempt.score)}/{toArabic(attempt.totalQuestions)})</span>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        {/* Stats Row - Larger Text */}
+                                                        <div className="flex justify-between items-center text-text-muted border-t border-zinc-700 pt-3 mt-1 w-full text-xl font-medium">
+                                                            <span className="flex items-center gap-2"><span className="text-green-400 font-bold text-2xl">{toArabic(attempt.score)}</span> صح</span>
+                                                            <span className="flex items-center gap-2"><span className="text-red-400 font-bold text-2xl">{toArabic(incorrect)}</span> خطأ</span>
+                                                            <span className="flex items-center gap-2"><span className="text-yellow-400 font-bold text-2xl">{toArabic(unanswered)}</span> متروك</span>
+                                                            <span className="flex items-center gap-2 text-lg text-zinc-400"><ClockIcon className="w-5 h-5" /> {formatTime(attempt.durationSeconds)}</span>
                                                         </div>
                                                     </div>
-                                                    
-                                                    {/* Stats Row - Larger Text */}
-                                                    <div className="flex justify-between items-center text-text-muted border-t border-zinc-700 pt-3 mt-1 w-full text-xl font-medium">
-                                                        <span className="flex items-center gap-2"><span className="text-green-400 font-bold text-2xl">{toArabic(attempt.score)}</span> صح</span>
-                                                        <span className="flex items-center gap-2"><span className="text-red-400 font-bold text-2xl">{toArabic(incorrect)}</span> خطأ</span>
-                                                        <span className="flex items-center gap-2"><span className="text-yellow-400 font-bold text-2xl">{toArabic(unanswered)}</span> متروك</span>
-                                                        <span className="flex items-center gap-2 text-lg text-zinc-400"><ClockIcon className="w-5 h-5" /> {formatTime(attempt.durationSeconds)}</span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                ) : (
-                                    <p className="text-text-muted text-center py-8">لا توجد محاولات سابقة لهذا الاختبار.</p>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center h-full text-center text-text-muted py-16 flex-grow">
-                                <ArrowLeftIcon className="w-16 h-16 mb-4 animate-pulse" />
-                                <p className="text-lg">الرجاء تحديد اختبار من الشريط الجانبي لعرض التفاصيل.</p>
-                            </div>
-                        )}
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <p className="text-text-muted text-center py-8">لا توجد محاولات سابقة لهذا الاختبار.</p>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center justify-center h-full text-center text-text-muted py-16 flex-grow">
+                                    <ArrowLeftIcon className="w-16 h-16 mb-4 animate-pulse" />
+                                    <p className="text-lg">الرجاء تحديد اختبار من الشريط الجانبي لعرض التفاصيل.</p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </main>
             </div>

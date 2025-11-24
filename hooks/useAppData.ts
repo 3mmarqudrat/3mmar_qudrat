@@ -413,12 +413,57 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
         };
         addQuestionsToReview(section, [questionToAdd]);
     };
+
+  // Export Data Logic
+  const exportAllData = () => {
+      try {
+          const dataStr = JSON.stringify(allUsersData);
+          const blob = new Blob([dataStr], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          const date = new Date().toISOString().split('T')[0];
+          link.download = `qudrat_backup_${date}.json`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          return true;
+      } catch (e) {
+          console.error("Export failed:", e);
+          return false;
+      }
+  };
+
+  // Import Data Logic
+  const importAllData = (file: File): Promise<boolean> => {
+      return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = async (e) => {
+              const text = e.target?.result as string;
+              try {
+                  const data = JSON.parse(text);
+                  // Basic validation
+                  if (typeof data !== 'object') throw new Error("Invalid data format");
+                  
+                  await saveAllUsersData(data);
+                  setAllUsersData(data);
+                  resolve(true);
+              } catch (err) {
+                  console.error("Import failed", err);
+                  reject(err);
+              }
+          };
+          reader.onerror = () => reject(new Error("File read error"));
+          reader.readAsText(file);
+      });
+  };
   
   const reviewedQuestionIdsSet = useMemo(() => new Set(Object.keys(data.reviewedQuestionIds || {})), [data.reviewedQuestionIds]);
 
   return { 
     data, 
-    isLoading, // Export loading state
+    isLoading, 
     addTest, 
     addQuestionsToTest, 
     deleteTest, 
@@ -432,6 +477,8 @@ export const useAppData = (userId: string | null, isDevUser: boolean, isPreviewM
     deleteUserData, 
     addDelayedQuestionToReview, 
     addSpecialLawQuestionToReview, 
+    exportAllData,
+    importAllData,
     reviewedQuestionIds: reviewedQuestionIdsSet 
   };
 };
